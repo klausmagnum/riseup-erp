@@ -482,7 +482,28 @@ export default function Home() {
             </div>
           </header>
 
-          <DashboardAgendaObrigacoes />
+          <div className="w-full">
+            <DashboardAgendaObrigacoes />
+          </div>
+
+          <section className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/55 p-4 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-3 max-[640px]:items-start max-[640px]:flex-col">
+              <div>
+                <h2 className="text-base font-black">Ideias para evoluir a rotina</h2>
+                <p className="mt-1 text-xs text-slate-400">Funcionalidades que podem virar os proximos modulos do sistema.</p>
+              </div>
+              <span className="rounded-full border border-violet-300/30 bg-violet-300/10 px-3 py-1 text-[11px] font-bold text-violet-200">
+                Roadmap
+              </span>
+            </div>
+            <div className="mt-4 grid w-full grid-cols-3 gap-3 max-[980px]:grid-cols-2 max-[620px]:grid-cols-1">
+              {ideas.map((idea) => (
+                <article className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs leading-5 text-slate-300" key={idea}>
+                  {idea}
+                </article>
+              ))}
+            </div>
+          </section>
 
           <section className="mt-5 rounded-2xl border border-sky-300/20 bg-slate-950/60 p-4 backdrop-blur-xl">
             <div className="flex items-center justify-between gap-3 max-[760px]:items-start max-[760px]:flex-col">
@@ -755,24 +776,6 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="mt-4 rounded-2xl border border-white/10 bg-slate-950/55 p-4 backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-3 max-[640px]:items-start max-[640px]:flex-col">
-              <div>
-                <h2 className="text-base font-black">Ideias para evoluir a rotina</h2>
-                <p className="mt-1 text-xs text-slate-400">Funcionalidades que podem virar os proximos modulos do sistema.</p>
-              </div>
-              <span className="rounded-full border border-violet-300/30 bg-violet-300/10 px-3 py-1 text-[11px] font-bold text-violet-200">
-                Roadmap
-              </span>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-3 max-[980px]:grid-cols-2 max-[620px]:grid-cols-1">
-              {ideas.map((idea) => (
-                <article className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs leading-5 text-slate-300" key={idea}>
-                  {idea}
-                </article>
-              ))}
-            </div>
-          </section>
         </section>
       </div>
     </main>

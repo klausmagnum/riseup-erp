@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import ErpSidebar from "@/app/components/ErpSidebar";
-import { LogoffLink } from "@/app/components/TopbarUser";
+import { LogoffLink, currentUserStorageKey } from "@/app/components/TopbarUser";
 
 const cadastroItems = [
   "Obrigações",
@@ -29,6 +30,21 @@ const relatorioItems = [
 ];
 
 export default function MyDesktop() {
+  const [userName, setUserName] = useState("");
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(currentUserStorageKey);
+      if (stored) {
+        const user = JSON.parse(stored);
+        const firstName = user.nome ? user.nome.split(" ")[0] : "Usuário";
+        setUserName(firstName);
+      }
+    } catch {
+      setUserName("Usuário");
+    }
+  }, []);
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#070b16] text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(34,211,238,0.26),transparent_30%),radial-gradient(circle_at_84%_8%,rgba(167,139,250,0.28),transparent_32%),radial-gradient(circle_at_62%_78%,rgba(56,189,248,0.14),transparent_34%),linear-gradient(135deg,#061020_0%,#080b18_48%,#12091f_100%)]" />
@@ -209,7 +225,7 @@ export default function MyDesktop() {
 
           {/* SAUDAÇÃO E RESUMO DO DIA */}
           <div className="mb-6 rounded-2xl border border-white/10 bg-slate-950/60 px-6 py-5 backdrop-blur-xl">
-            <h1 className="text-2xl font-black">Bom dia, Tatiane</h1>
+            <h1 className="text-2xl font-black">Olá, {userName}! 👋</h1>
             <p className="mt-3 text-sm text-slate-300">Hoje você tem:</p>
             <ul className="mt-4 space-y-2">
               <li className="flex items-center gap-2 text-sm">
