@@ -143,11 +143,6 @@ function ModuleIcon({ icon }: { icon: string }) {
 
 export default function ErpSidebar() {
   const pathname = usePathname();
-  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => ({}));
-
-  function toggleMenu(label: string) {
-    setOpenMenus((current) => ({ ...current, [label]: !current[label] }));
-  }
 
   return (
     <aside className="border-r border-white/10 bg-[#061020] px-4 py-5 max-[980px]:border-b max-[980px]:border-r-0">
@@ -168,9 +163,7 @@ export default function ErpSidebar() {
 
       <nav className="mt-5 grid gap-3 max-[980px]:grid-cols-3 max-[640px]:grid-cols-2" suppressHydrationWarning>
         {modules.map((item) => {
-          const hasChildren = Boolean(item.children?.length);
-          const isOpen = Boolean(openMenus[item.label]);
-          const isActive = item.href === pathname || Boolean(item.children?.some((child) => child.href === pathname));
+          const isActive = item.href === pathname;
           const isDisabled = item.disabled;
           const itemClassName = `flex items-center gap-2 transition ${
             isDisabled
@@ -181,44 +174,17 @@ export default function ErpSidebar() {
           }`;
 
           return (
-          <div key={item.label}>
-            {hasChildren ? (
-              <button
-                aria-expanded={isOpen}
-                className={`${itemClassName} appearance-none`}
-                onClick={() => toggleMenu(item.label)}
-                type="button"
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <ModuleIcon icon={item.icon} />
-                  <span className="truncate">{item.label}</span>
-                </span>
-                <svg className={`size-3.5 text-slate-400 transition ${isOpen ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="m9 18 6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            ) : (
-              <Link
-                className={itemClassName}
-                href={isDisabled ? "#" : item.href}
-                onClick={(e) => isDisabled && e.preventDefault()}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <ModuleIcon icon={item.icon} />
-                  <span className="truncate">{item.label}</span>
-                </span>
-              </Link>
-            )}
-            {hasChildren && isOpen && (
-              <div className="ml-6 mt-1 grid gap-1 border-l border-white/10 pl-3">
-                {item.children?.map((child) => (
-                  <Link className={`rounded-md px-2 py-1.5 text-[12px] font-normal transition hover:bg-white/[0.05] hover:text-sky-100 ${child.href === pathname ? "bg-white/[0.06] text-sky-100" : "text-slate-400"}`} href={child.href} key={child.href}>
-                    {child.label}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
+            <Link
+              key={item.label}
+              className={itemClassName}
+              href={isDisabled ? "#" : item.href}
+              onClick={(e) => isDisabled && e.preventDefault()}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <ModuleIcon icon={item.icon} />
+                <span className="truncate">{item.label}</span>
+              </span>
+            </Link>
           );
         })}
       </nav>
