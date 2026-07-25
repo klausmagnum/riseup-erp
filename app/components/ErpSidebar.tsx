@@ -7,28 +7,16 @@ import { useState } from "react";
 import { LoggedUserPanel } from "./TopbarUser";
 
 const modules = [
-  { label: "Dashboard", href: "/", icon: "dashboard" },
-  {
-    label: "Documentos Fiscais",
-    href: "/documentos-fiscais/painel",
-    icon: "tax",
-    children: [
-      { label: "Painel Fiscal", href: "/documentos-fiscais/painel" },
-      { label: "NFS-e", href: "/documentos-fiscais/nfse" },
-      { label: "NF-e", href: "/documentos-fiscais/nfe" },
-      { label: "NFC-e", href: "/documentos-fiscais/nfce" },
-      { label: "CT-e", href: "/documentos-fiscais/cte" },
-      { label: "Sincronizações", href: "/documentos-fiscais/sincronizacoes" },
-      { label: "Pendências", href: "/documentos-fiscais/pendencias" },
-      { label: "Importações", href: "/documentos-fiscais/importacoes" },
-    ],
-  },
-  { label: "Gest\u00e3o de Tarefas", href: "#", icon: "tasks" },
-  { label: "Cont\u00e1bil", href: "#", icon: "accounting" },
-  { label: "Fiscal/Tribut\u00e1rio", href: "#", icon: "tax" },
-  { label: "Trabalhista/Pessoal", href: "#", icon: "people" },
-  { label: "Agenda Fiscal", href: "#", icon: "calendar" },
-  { label: "Financeiro", href: "#", icon: "finance" },
+  { label: "Dashboard", href: "/", icon: "dashboard", disabled: false },
+  { label: "My Desktop", href: "/my-desktop", icon: "desktop", disabled: false },
+  { label: "Base de Procedimentos", href: "/base-procedimentos", icon: "procedures", disabled: false },
+  { label: "Gest\u00e3o de Tarefas", href: "#", icon: "tasks", disabled: true },
+  { label: "Cont\u00e1bil", href: "#", icon: "accounting", disabled: true },
+  { label: "Fiscal/Tribut\u00e1rio", href: "#", icon: "tax", disabled: true },
+  { label: "Trabalhista/Pessoal", href: "#", icon: "people", disabled: true },
+  { label: "Agenda Fiscal", href: "#", icon: "calendar", disabled: true },
+  { label: "Financeiro", href: "#", icon: "finance", disabled: true },
+  { label: "Padr\u00e3o", href: "/padrao", icon: "default", disabled: false },
 ];
 
 function ModuleIcon({ icon }: { icon: string }) {
@@ -108,6 +96,39 @@ function ModuleIcon({ icon }: { icon: string }) {
     );
   }
 
+  if (icon === "desktop") {
+    return (
+      <svg {...commonProps}>
+        <path d="M2 3h20v14H2z" />
+        <path d="M6 17h12" />
+        <path d="M9 17v2" />
+        <path d="M15 17v2" />
+      </svg>
+    );
+  }
+
+  if (icon === "default") {
+    return (
+      <svg {...commonProps}>
+        <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9" />
+        <path d="M9 3v4h4V3" />
+        <path d="M9 11h6" />
+        <path d="M9 15h6" />
+      </svg>
+    );
+  }
+
+  if (icon === "procedures") {
+    return (
+      <svg {...commonProps}>
+        <path d="M4 19.5V4.5A2.5 2.5 0 0 1 6.5 2H18v20H6.5A2.5 2.5 0 0 1 4 19.5Z" />
+        <path d="M9 7h6" />
+        <path d="M9 11h6" />
+        <path d="M9 15h3" />
+      </svg>
+    );
+  }
+
   return (
     <svg {...commonProps}>
       <path d="M7 2v4" />
@@ -122,9 +143,7 @@ function ModuleIcon({ icon }: { icon: string }) {
 
 export default function ErpSidebar() {
   const pathname = usePathname();
-  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => ({
-    "Documentos Fiscais": pathname.startsWith("/documentos-fiscais"),
-  }));
+  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => ({}));
 
   function toggleMenu(label: string) {
     setOpenMenus((current) => ({ ...current, [label]: !current[label] }));
@@ -147,15 +166,18 @@ export default function ErpSidebar() {
         />
       </Link>
 
-      <nav className="mt-5 grid gap-1.5 max-[980px]:grid-cols-3 max-[640px]:grid-cols-2">
+      <nav className="mt-5 grid gap-3 max-[980px]:grid-cols-3 max-[640px]:grid-cols-2" suppressHydrationWarning>
         {modules.map((item) => {
           const hasChildren = Boolean(item.children?.length);
           const isOpen = Boolean(openMenus[item.label]);
           const isActive = item.href === pathname || Boolean(item.children?.some((child) => child.href === pathname));
-          const itemClassName = `flex min-h-10 w-full items-center justify-between rounded-lg border px-3 text-left text-base font-normal leading-none transition ${
-            isActive
-              ? "border-sky-300/35 bg-sky-300/12 text-sky-100"
-              : "border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.06]"
+          const isDisabled = item.disabled;
+          const itemClassName = `flex items-center gap-2 transition ${
+            isDisabled
+              ? "text-slate-600 cursor-not-allowed"
+              : isActive
+              ? "text-sky-100 font-semibold"
+              : "text-slate-300 hover:text-sky-100"
           }`;
 
           return (
@@ -178,7 +200,8 @@ export default function ErpSidebar() {
             ) : (
               <Link
                 className={itemClassName}
-                href={item.href}
+                href={isDisabled ? "#" : item.href}
+                onClick={(e) => isDisabled && e.preventDefault()}
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <ModuleIcon icon={item.icon} />
