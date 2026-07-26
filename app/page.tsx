@@ -484,6 +484,7 @@ export default function Home() {
 
           <div className="w-full">
             <DashboardAgendaObrigacoes />
+            {/* Dashboard principal com obrigações ocupando toda largura */}
           </div>
 
           <section className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/55 p-4 backdrop-blur-xl">
