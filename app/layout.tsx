@@ -16,6 +16,9 @@ export default function RootLayout({
       lang="pt-BR"
       className="h-full antialiased"
     >
+      <head>
+        <script src="/erp-integration.js" async></script>
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

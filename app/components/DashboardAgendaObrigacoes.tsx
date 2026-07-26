@@ -643,6 +643,8 @@ export default function DashboardAgendaObrigacoes() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [feedback, setFeedback] = useState("");
+  const [confirmModal, setConfirmModal] = useState<{ tarefa: AgendaTarefa; cliente: string } | null>(null);
+  const [confirmObrigacaoModal, setConfirmObrigacaoModal] = useState<{ obrigacao: AgendaObrigacao; cliente: Cliente } | null>(null);
   const today = useMemo(() => startOfDay(new Date()), []);
 
   useEffect(() => {
@@ -992,7 +994,7 @@ export default function DashboardAgendaObrigacoes() {
 
       {feedback && <p className="mt-3 rounded-lg border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs text-rose-100">{feedback}</p>}
 
-      <div className="mt-4 grid grid-cols-[minmax(0,1fr)_320px] gap-4 max-[1120px]:grid-cols-1">
+      <div className="mt-4">
         <div className="max-h-[680px] overflow-auto rounded-xl border border-white/10 bg-slate-950/45">
           {isLoading ? (
             <div className="p-6 text-center text-xs text-slate-400">Carregando agenda...</div>
@@ -1075,7 +1077,7 @@ export default function DashboardAgendaObrigacoes() {
                                           <strong className="block truncate text-xs text-slate-100">{cliente}</strong>
                                           <button
                                             className="min-h-7 rounded-md bg-emerald-300 px-2.5 text-[10px] font-black text-slate-950 transition hover:bg-emerald-200"
-                                            onClick={() => finalizarClienteTarefa(tarefa, cliente)}
+                                            onClick={() => setConfirmModal({ tarefa, cliente })}
                                             type="button"
                                           >
                                             Finalizar
@@ -1154,7 +1156,7 @@ export default function DashboardAgendaObrigacoes() {
                                         </div>
                                         <button
                                           className="min-h-7 rounded-md bg-emerald-300 px-2.5 text-[10px] font-black text-slate-950 transition hover:bg-emerald-200"
-                                          onClick={() => finalizarClienteObrigacao(obrigacao, cliente)}
+                                          onClick={() => setConfirmObrigacaoModal({ obrigacao, cliente })}
                                           type="button"
                                         >
                                           Finalizar
@@ -1176,32 +1178,70 @@ export default function DashboardAgendaObrigacoes() {
             </div>
           )}
         </div>
-
-        <aside className="grid content-start gap-3">
-          <section className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-            <h3 className="text-sm font-black">Insights automaticos</h3>
-            <p className="mt-1 text-[11px] leading-5 text-slate-500">Pontos que ajudam a priorizar as entregas pela data real de vencimento.</p>
-            <div className="mt-3 grid gap-2">
-              {insights.map((insight) => (
-                <article className="rounded-lg border border-white/10 bg-slate-950/55 p-3" key={insight.title}>
-                  <strong className={`text-xs ${insight.tone}`}>{insight.title}</strong>
-                  <p className="mt-2 text-[11px] leading-5 text-slate-400">{insight.detail}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-            <h3 className="text-sm font-black">Boas ideias para evoluir</h3>
-            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-slate-300">
-              <p className="rounded-lg border border-white/10 bg-slate-950/55 p-2">Marcar automaticamente como prioridade tudo que vence nos próximos 3 dias.</p>
-              <p className="rounded-lg border border-white/10 bg-slate-950/55 p-2">Gerar tarefas do dia usando esta agenda, ja separadas por responsavel.</p>
-              <p className="rounded-lg border border-white/10 bg-slate-950/55 p-2">Destacar obrigações anuais próximas, como ECD e ECF, antes das rotinas mensais mais distantes.</p>
-              <p className="rounded-lg border border-white/10 bg-slate-950/55 p-2">Criar alerta de cadastro quando o prazo estiver sem dia ou sem mes suficiente para calcular.</p>
-            </div>
-          </section>
-        </aside>
       </div>
+
+      {confirmModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 backdrop-blur-sm" suppressHydrationWarning>
+          <div className="rounded-2xl border border-white/10 bg-[#061020] p-6 shadow-2xl max-w-sm">
+            <h2 className="text-lg font-black text-slate-100">Confirmar Finalização</h2>
+            <p className="mt-3 text-sm text-slate-300">
+              Deseja realmente finalizar esta tarefa para <strong>{confirmModal.cliente}</strong>?
+            </p>
+            <div className="mt-6 flex gap-3 justify-end">
+              <button
+                className="min-h-10 rounded-lg border border-white/10 px-4 text-xs font-bold text-slate-200 transition hover:border-sky-300/40 hover:text-sky-100"
+                onClick={() => setConfirmModal(null)}
+                type="button"
+              >
+                Não
+              </button>
+              <button
+                className="min-h-10 rounded-lg bg-emerald-300 px-4 text-xs font-black text-slate-950 transition hover:bg-emerald-200"
+                onClick={() => {
+                  if (confirmModal) {
+                    finalizarClienteTarefa(confirmModal.tarefa, confirmModal.cliente);
+                    setConfirmModal(null);
+                  }
+                }}
+                type="button"
+              >
+                Sim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmObrigacaoModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 backdrop-blur-sm" suppressHydrationWarning>
+          <div className="rounded-2xl border border-white/10 bg-[#061020] p-6 shadow-2xl max-w-sm">
+            <h2 className="text-lg font-black text-slate-100">Confirmar Finalização</h2>
+            <p className="mt-3 text-sm text-slate-300">
+              Deseja realmente finalizar esta obrigação para <strong>{confirmObrigacaoModal.cliente.nome_fantasia}</strong>?
+            </p>
+            <div className="mt-6 flex gap-3 justify-end">
+              <button
+                className="min-h-10 rounded-lg border border-white/10 px-4 text-xs font-bold text-slate-200 transition hover:border-sky-300/40 hover:text-sky-100"
+                onClick={() => setConfirmObrigacaoModal(null)}
+                type="button"
+              >
+                Não
+              </button>
+              <button
+                className="min-h-10 rounded-lg bg-emerald-300 px-4 text-xs font-black text-slate-950 transition hover:bg-emerald-200"
+                onClick={() => {
+                  if (confirmObrigacaoModal) {
+                    finalizarClienteObrigacao(confirmObrigacaoModal.obrigacao, confirmObrigacaoModal.cliente);
+                    setConfirmObrigacaoModal(null);
+                  }
+                }}
+                type="button"
+              >
+                Sim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
