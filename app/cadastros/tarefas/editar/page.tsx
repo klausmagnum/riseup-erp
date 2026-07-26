@@ -1,4 +1,4 @@
-﻿import TarefaForm from "../TarefaForm";
+import TarefaForm from "../TarefaForm";
 
 type EditarTarefaPageProps = {
   searchParams: Promise<{ id?: string }>;

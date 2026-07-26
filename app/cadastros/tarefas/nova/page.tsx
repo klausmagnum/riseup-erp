@@ -1,4 +1,4 @@
-﻿import TarefaForm from "../TarefaForm";
+import TarefaForm from "../TarefaForm";
 
 export default function NovaTarefaPage() {
   return <TarefaForm mode="nova" />;
