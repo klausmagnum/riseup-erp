@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Informe e-mail e senha temporaria." }, { status: 400 });
   }
 
-  const { error: createError } = await adminClient.auth.admin.createUser({
+  const { data: authUser, error: createError } = await adminClient.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
@@ -89,6 +89,21 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ error: createError.message }, { status: 400 });
+  }
+
+  // Insere o usuário na tabela usuarios_sistema
+  const { error: dbError } = await adminClient
+    .from("usuarios_sistema")
+    .upsert({
+      email,
+      nome: nome || email,
+      setor: "Geral",
+      perfil: "Operador",
+      status: "Ativo",
+    }, { onConflict: "email" });
+
+  if (dbError) {
+    return NextResponse.json({ error: `Erro ao criar usuário no banco de dados: ${dbError.message}` }, { status: 400 });
   }
 
   return NextResponse.json({ ok: true, alreadyExists: false });

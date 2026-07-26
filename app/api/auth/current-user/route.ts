@@ -51,7 +51,26 @@ export async function GET(request: Request) {
   }
 
   if (!usuario) {
-    return NextResponse.json({ error: "Login autenticado, mas o e-mail nao existe em Cadastro / Usuarios." }, { status: 404 });
+    // Se não existir, cria automaticamente (primeira vez que faz login)
+    const { data: novoUsuario, error: criarError } = await adminClient
+      .from("usuarios_sistema")
+      .insert({
+        email: user.email,
+        nome: user.user_metadata?.full_name || user.email.split("@")[0],
+        setor: "Geral",
+        perfil: "Operador",
+        status: "Ativo",
+      })
+      .select("id,nome,email,perfil,status")
+      .single();
+
+    if (criarError || !novoUsuario) {
+      return NextResponse.json({
+        error: `Nao foi possivel criar usuario: ${criarError?.message || "Desconhecido"}`
+      }, { status: 500 });
+    }
+
+    return NextResponse.json({ usuario: novoUsuario });
   }
 
   if ((usuario.status ?? "").toLowerCase() === "inativo") {

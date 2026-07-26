@@ -66,6 +66,8 @@ export function LoggedUserPanel() {
 export function LogoffLink() {
   async function handleLogoff() {
     window.localStorage.removeItem(currentUserStorageKey);
+    // Remove o cookie de autenticação
+    document.cookie = 'auth-token=; path=/; max-age=0';
     window.dispatchEvent(new Event("tf-erp-user-changed"));
     await supabase.auth.signOut();
   }

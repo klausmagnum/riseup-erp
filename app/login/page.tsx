@@ -32,7 +32,7 @@ export default function LoginPage() {
     setIsLoading(true);
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email: email.trim(),
-      password: senha,
+      password: senha.trim(),
     });
 
     if (authError) {
@@ -71,6 +71,10 @@ export default function LoginPage() {
       perfil: result.usuario.perfil,
       lembrar,
     }));
+
+    // Seta um cookie com o token de autenticação para proteção no middleware
+    document.cookie = `auth-token=${authData.session.access_token}; path=/; max-age=${lembrar ? 30 * 24 * 60 * 60 : 24 * 60 * 60}; samesite=lax`;
+
     window.dispatchEvent(new Event("tf-erp-user-changed"));
     router.push("/");
   }
