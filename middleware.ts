@@ -16,13 +16,16 @@ export function middleware(request: NextRequest) {
     '/api/dev',
   ];
 
+  // Extensões de arquivo estático que não precisam de autenticação
+  const staticFileExtensions = /\.(png|jpg|jpeg|gif|svg|ico|webp|css|js|json|xml|txt)$/i;
+
   // Se for rota pública, deixa passar
   if (publicRoutes.includes(pathname)) {
     return NextResponse.next();
   }
 
   // Se for arquivo estático ou endpoint de API/setup/dev, deixa passar
-  if (excludedPaths.some(path => pathname.startsWith(path))) {
+  if (excludedPaths.some(path => pathname.startsWith(path)) || staticFileExtensions.test(pathname)) {
     return NextResponse.next();
   }
 
