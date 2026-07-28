@@ -144,11 +144,8 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
   }, []);
 
   useEffect(() => {
-    const obrigacoesFiltradas = todasAsObrigacoes.filter(
-      (obrigacao) => obrigacao.regime === form.regimeTributario || obrigacao.regime === null
-    );
-    setObrigacoes(obrigacoesFiltradas);
-  }, [form.regimeTributario, todasAsObrigacoes]);
+    setObrigacoes(todasAsObrigacoes);
+  }, [todasAsObrigacoes]);
 
   useEffect(() => {
     async function loadCliente() {
