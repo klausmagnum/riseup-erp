@@ -556,10 +556,12 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
                   className="min-h-8 rounded-lg border border-sky-300/30 bg-sky-300/10 px-3 text-xs font-bold text-sky-200 transition hover:bg-sky-300/20"
                   onClick={async () => {
                     setIsLoadingObrigacoes(true);
-                    const { data: obrigacoesData } = await supabase
+                    const { data: obrigacoesData, error } = await supabase
                       .from("obrigacoes")
                       .select("id,nome,regime,periodicidade,setor,status")
                       .order("nome", { ascending: true });
+                    console.log("Recarregar clicado - Obrigações:", obrigacoesData);
+                    console.log("Erro (se houver):", error);
                     setObrigacoes(obrigacoesData ?? []);
                     setTodasAsObrigacoes(obrigacoesData ?? []);
                     setIsLoadingObrigacoes(false);
