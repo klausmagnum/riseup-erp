@@ -16,7 +16,6 @@ const cadastroItems = [
 ];
 
 const configuracaoItems = [
-  { label: "Dashboard", href: "/" },
   { label: "Dados da empresa", href: "/configuracoes/dados-empresa" },
 ];
 
@@ -252,7 +251,7 @@ export default function MyDesktop() {
           </div>
 
           {/* BLOCOS PRINCIPAIS */}
-          <div className="grid grid-cols-2 gap-5 max-[1024px]:grid-cols-1">
+          <div className="grid grid-cols-3 gap-5 max-[1024px]:grid-cols-2 max-[640px]:grid-cols-1">
             {/* Minhas tarefas de hoje */}
             <div className="rounded-2xl border border-white/10 bg-slate-950/60 px-6 py-5 backdrop-blur-xl">
               <h2 className="text-lg font-black text-sky-300">Minhas tarefas de hoje</h2>

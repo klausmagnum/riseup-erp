@@ -107,7 +107,6 @@ const cadastroItems = [
 ];
 
 const configuracaoItems = [
-  { label: "Dashboard", href: "/" },
   { label: "Dados da empresa", href: "/configuracoes/dados-empresa" },
 ];
 
@@ -380,7 +379,21 @@ export default function BaseProcedimentos() {
                   {cadastroItems.map((item) => (
                     <Link
                       className="flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-left text-[15px] font-normal text-slate-300 transition hover:bg-white/[0.06] hover:text-sky-100"
-                      href="#"
+                      href={
+                        item === "Obrigações"
+                          ? "/cadastros/obrigacoes"
+                          : item === "Tarefas"
+                            ? "/cadastros/tarefas"
+                          : item === "Clientes"
+                            ? "/cadastros/clientes"
+                          : item === "Usuários"
+                            ? "/cadastros/usuarios"
+                          : item === "Setores"
+                            ? "/cadastros/setores"
+                          : item === "Grupo de clientes"
+                            ? "/cadastros/grupo-clientes"
+                            : "#"
+                      }
                       key={item}
                     >
                       <span>{item}</span>

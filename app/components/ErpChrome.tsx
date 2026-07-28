@@ -21,7 +21,6 @@ const relatorioItems = [
 ];
 
 const configuracaoItems = [
-  { label: "Dashboard", href: "/" },
   { label: "Dados da empresa", href: "/configuracoes/dados-empresa" },
 ];
 
