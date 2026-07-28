@@ -118,6 +118,7 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
   const [isLoadingCliente, setIsLoadingCliente] = useState(mode === "edit");
   const [isLoadingObrigacoes, setIsLoadingObrigacoes] = useState(true);
   const [isLoadingAnexos, setIsLoadingAnexos] = useState(mode === "edit");
+  const [todasAsObrigacoes, setTodasAsObrigacoes] = useState<Obrigacao[]>([]);
 
   useEffect(() => {
     async function loadBaseData() {
@@ -134,13 +135,20 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
       if (obrigacoesError) {
         setFeedback(`Erro ao buscar obrigacoes: ${obrigacoesError.message}`);
       } else {
-        setObrigacoes(obrigacoesData ?? []);
+        setTodasAsObrigacoes(obrigacoesData ?? []);
       }
       setIsLoadingObrigacoes(false);
     }
 
     loadBaseData();
   }, []);
+
+  useEffect(() => {
+    const obrigacoesFiltradas = todasAsObrigacoes.filter(
+      (obrigacao) => obrigacao.regime === form.regimeTributario || obrigacao.regime === null
+    );
+    setObrigacoes(obrigacoesFiltradas);
+  }, [form.regimeTributario, todasAsObrigacoes]);
 
   useEffect(() => {
     async function loadCliente() {
