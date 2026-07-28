@@ -41,16 +41,16 @@ const matrizFilialOptions = ["Matriz", "Filial"];
 const estados = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
 const regimesTributarios = [
   "CEI",
-  "Empresa rural",
+  "Empresa Rural",
   "Imune - Isenta",
   "Inativas",
-  "Lucro presumido",
-  "Lucro real",
+  "Lucro Presumido",
+  "Lucro Real",
   "MEI",
-  "Pessoa fisica",
+  "Pessoa Fisica",
   "RET",
-  "Simples nacional",
-  "Simples nacional - Sublimite ICMS e ISS",
+  "Simples Nacional",
+  "Simples Nacional Sublimite ICMS e ISS",
 ];
 
 const categoriasAnexo = ["Documento", "Contrato", "Procuração", "Comprovante", "Outros"];
@@ -67,7 +67,7 @@ const emptyForm = {
   cei: "",
   cep: "",
   logradouro: "",
-  regimeTributario: "Simples nacional",
+  regimeTributario: "Simples Nacional",
   numero: "",
   complemento: "",
   grupoClientes: "",
@@ -179,7 +179,7 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
         cei: data.cei || "",
         cep: data.cep || "",
         logradouro: data.logradouro || "",
-        regimeTributario: data.regime_tributario || "Simples nacional",
+        regimeTributario: data.regime_tributario || "Simples Nacional",
         numero: data.numero || "",
         complemento: data.complemento || "",
         grupoClientes: data.grupo_clientes || "",
@@ -198,6 +198,16 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
 
     loadCliente();
   }, [editingId, mode]);
+
+  useEffect(() => {
+    if (todasAsObrigacoes.length === 0) return;
+
+    const filteredObrigacoes = todasAsObrigacoes.filter(
+      (obrigacao) => obrigacao.regime === form.regimeTributario
+    );
+
+    setObrigacoes(filteredObrigacoes);
+  }, [form.regimeTributario, todasAsObrigacoes]);
 
   function updateField(field: keyof typeof emptyForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
