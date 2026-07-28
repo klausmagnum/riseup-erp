@@ -551,9 +551,27 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
                   Marque com check verde as obrigacoes que devem ficar vinculadas a este cliente.
                 </p>
               </div>
-              <span className="rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 text-[11px] font-bold text-slate-300">
-                {selectedObrigacaoIds.size} vinculada(s)
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  className="min-h-8 rounded-lg border border-sky-300/30 bg-sky-300/10 px-3 text-xs font-bold text-sky-200 transition hover:bg-sky-300/20"
+                  onClick={async () => {
+                    setIsLoadingObrigacoes(true);
+                    const { data: obrigacoesData } = await supabase
+                      .from("obrigacoes")
+                      .select("id,nome,regime,periodicidade,setor,status")
+                      .order("nome", { ascending: true });
+                    setObrigacoes(obrigacoesData ?? []);
+                    setTodasAsObrigacoes(obrigacoesData ?? []);
+                    setIsLoadingObrigacoes(false);
+                  }}
+                  type="button"
+                >
+                  ↻ Recarregar
+                </button>
+                <span className="rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 text-[11px] font-bold text-slate-300">
+                  {selectedObrigacaoIds.size} vinculada(s)
+                </span>
+              </div>
             </div>
 
             <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
