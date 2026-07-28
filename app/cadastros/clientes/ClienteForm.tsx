@@ -135,6 +135,7 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
       if (obrigacoesError) {
         setFeedback(`Erro ao buscar obrigacoes: ${obrigacoesError.message}`);
       } else {
+        setObrigacoes(obrigacoesData ?? []);
         setTodasAsObrigacoes(obrigacoesData ?? []);
       }
       setIsLoadingObrigacoes(false);
@@ -142,10 +143,6 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
 
     loadBaseData();
   }, []);
-
-  useEffect(() => {
-    setObrigacoes(todasAsObrigacoes);
-  }, [todasAsObrigacoes]);
 
   useEffect(() => {
     async function loadCliente() {
