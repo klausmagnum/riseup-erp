@@ -135,6 +135,7 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
       if (obrigacoesError) {
         setFeedback(`Erro ao buscar obrigacoes: ${obrigacoesError.message}`);
       } else {
+        console.log("Obrigações carregadas:", obrigacoesData);
         setObrigacoes(obrigacoesData ?? []);
         setTodasAsObrigacoes(obrigacoesData ?? []);
       }
