@@ -28,7 +28,11 @@ async function getGoogleAccessToken(): Promise<string> {
   const header = { alg: "RS256", typ: "JWT" };
   const claim = {
     iss: serviceAccount.client_email,
-    scope: "https://www.googleapis.com/auth/drive.file",
+    // Escopo completo, e não drive.file: a conta de serviço precisa ler
+    // certificados que foram enviados manualmente ao Drive, e não apenas os
+    // arquivos que ela própria criou. O alcance real fica limitado ao que for
+    // compartilhado com o e-mail da conta de serviço.
+    scope: "https://www.googleapis.com/auth/drive",
     aud: serviceAccount.token_uri || "https://oauth2.googleapis.com/token",
     exp: now + 3600,
     iat: now,
