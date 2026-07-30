@@ -115,6 +115,118 @@ export async function deleteDriveFile(fileId: string): Promise<void> {
   }
 }
 
+/**
+ * Devolve o id da subpasta com esse nome, criando-a se ainda não existir.
+ * Idempotente: a sincronização roda várias vezes por dia sobre as mesmas pastas.
+ */
+export async function ensureDriveFolder(
+  name: string,
+  parentFolderId: string
+): Promise<string> {
+  const accessToken = await getGoogleAccessTokenCached();
+  const nomeEscapado = name.replace(/'/g, "\\'");
+
+  const query = [
+    `name='${nomeEscapado}'`,
+    `'${parentFolderId}' in parents`,
+    "mimeType='application/vnd.google-apps.folder'",
+    "trashed=false",
+  ].join(" and ");
+
+  const busca = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}` +
+      `&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (busca.ok) {
+    const data = await busca.json();
+    if (data.files?.length > 0) {
+      return data.files[0].id;
+    }
+  }
+
+  const criacao = await fetch(
+    "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: [parentFolderId],
+      }),
+    }
+  );
+
+  if (!criacao.ok) {
+    throw new Error(`Erro ao criar pasta "${name}": ${criacao.statusText}`);
+  }
+
+  const data = await criacao.json();
+  return data.id;
+}
+
+/**
+ * Estrutura de arquivamento: <raiz>/<cliente>/<tipo>/<ano>/<mês>.
+ * Devolve o id da pasta folha, onde o XML deve ser gravado.
+ */
+export async function ensureDocumentoFolder(params: {
+  nomeCliente: string;
+  tipoDocumento: string;
+  ano: string;
+  mes: string;
+}): Promise<string> {
+  const raiz = getDriveRootFolderId();
+  const cliente = await ensureDriveFolder(params.nomeCliente, raiz);
+  const tipo = await ensureDriveFolder(params.tipoDocumento, cliente);
+  const ano = await ensureDriveFolder(params.ano, tipo);
+  return ensureDriveFolder(params.mes, ano);
+}
+
+/** Sobe conteúdo de texto (XML) sem precisar de um objeto File. */
+export async function uploadTextFile(params: {
+  nome: string;
+  conteudo: string;
+  parentFolderId: string;
+  mimeType?: string;
+}): Promise<{ id: string; webViewLink: string }> {
+  const accessToken = await getGoogleAccessTokenCached();
+  const mimeType = params.mimeType ?? "application/xml";
+
+  const formData = new FormData();
+  formData.append(
+    "metadata",
+    new Blob(
+      [JSON.stringify({ name: params.nome, parents: [params.parentFolderId] })],
+      { type: "application/json" }
+    )
+  );
+  formData.append("file", new Blob([params.conteudo], { type: mimeType }));
+
+  const response = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Erro ao subir "${params.nome}": ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return {
+    id: data.id,
+    webViewLink: data.webViewLink || `https://drive.google.com/file/d/${data.id}/view`,
+  };
+}
+
 export async function getDriveFile(fileId: string): Promise<Buffer> {
   const accessToken = await getGoogleAccessTokenCached();
 

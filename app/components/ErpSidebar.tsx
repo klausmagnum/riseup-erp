@@ -10,6 +10,7 @@ const modules = [
   { label: "Dashboard", href: "/", icon: "dashboard", disabled: false },
   { label: "My Desktop", href: "/my-desktop", icon: "desktop", disabled: false },
   { label: "Base de Procedimentos", href: "/base-procedimentos", icon: "procedures", disabled: false },
+  { label: "Documentos Fiscais", href: "/documentos-fiscais/painel", icon: "tax", disabled: false },
   { label: "Gest\u00e3o de Tarefas", href: "#", icon: "tasks", disabled: true },
   { label: "Cont\u00e1bil", href: "#", icon: "accounting", disabled: true },
   { label: "Fiscal/Tribut\u00e1rio", href: "#", icon: "tax", disabled: true },
