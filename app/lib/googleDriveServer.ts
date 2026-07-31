@@ -38,14 +38,21 @@ async function getGoogleAccessToken(): Promise<string> {
     iat: now,
   };
 
-  const base64Url = (input: string) =>
-    Buffer.from(input).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  // Aceita Buffer para que a assinatura não seja codificada duas vezes: a
+  // versão anterior fazia base64Url(signature.toString("base64")), gerando
+  // base64 de base64. O Google rejeitava com "Invalid JWT Signature" sempre.
+  const base64Url = (input: string | Buffer) =>
+    (Buffer.isBuffer(input) ? input : Buffer.from(input))
+      .toString("base64")
+      .replace(/=/g, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
 
   const unsignedJwt = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claim))}`;
   const signer = createSign("RSA-SHA256");
   signer.update(unsignedJwt);
   const signature = signer.sign(serviceAccount.private_key);
-  const jwt = `${unsignedJwt}.${base64Url(signature.toString("base64"))}`;
+  const jwt = `${unsignedJwt}.${base64Url(signature)}`;
 
   const response = await fetch(serviceAccount.token_uri || "https://oauth2.googleapis.com/token", {
     method: "POST",

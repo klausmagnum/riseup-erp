@@ -70,8 +70,14 @@ console.log(`  Pasta raiz:       ${pastaRaiz}\n`);
 
 // ---- 1. Autenticação ----
 const agora = Math.floor(Date.now() / 1000);
-const b64url = (s) =>
-  Buffer.from(s).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+// Precisa aceitar Buffer: codificar a assinatura ja convertida em base64
+// produziria base64 de base64, e o Google recusa com "Invalid JWT Signature".
+const b64url = (entrada) =>
+  (Buffer.isBuffer(entrada) ? entrada : Buffer.from(entrada))
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
 
 const cabecalho = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
 const corpo = b64url(
@@ -86,7 +92,7 @@ const corpo = b64url(
 
 const assinador = createSign("RSA-SHA256");
 assinador.update(`${cabecalho}.${corpo}`);
-const jwt = `${cabecalho}.${corpo}.${b64url(assinador.sign(conta.private_key).toString("base64"))}`;
+const jwt = `${cabecalho}.${corpo}.${b64url(assinador.sign(conta.private_key))}`;
 
 const respAuth = await fetch(conta.token_uri || "https://oauth2.googleapis.com/token", {
   method: "POST",
