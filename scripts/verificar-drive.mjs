@@ -178,10 +178,23 @@ const respUp = await fetch(
 // limpar(), inclusive as de erro: sem isso uma falha no meio do caminho
 // deixava pasta órfã acumulando no Drive da cliente.
 async function limpar() {
-  await fetch(`https://www.googleapis.com/drive/v3/files/${idTeste}?supportsAllDrives=true`, {
-    method: "DELETE",
-    headers: cab,
-  }).catch(() => {});
+  const url = `https://www.googleapis.com/drive/v3/files/${idTeste}?supportsAllDrives=true`;
+
+  const exclusao = await fetch(url, { method: "DELETE", headers: cab }).catch(() => null);
+  if (exclusao?.ok) return;
+
+  // Exclusão definitiva exige papel "Gerente" no Drive Compartilhado; com
+  // "Gerenciador de conteúdo" a API devolve 404 e a pasta permanece. A
+  // lixeira funciona nos dois casos.
+  const lixeira = await fetch(url, {
+    method: "PATCH",
+    headers: { ...cab, "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  }).catch(() => null);
+
+  if (!lixeira?.ok) {
+    console.warn(`\n  aviso: a pasta de teste ${idTeste} nao pode ser removida.`);
+  }
 }
 
 async function pararLimpando(mensagem, dica) {

@@ -113,16 +113,63 @@ export async function uploadDriveFile(
   };
 }
 
+/**
+ * Remove um arquivo do Drive.
+ *
+ * Em Drive Compartilhado, exclusão definitiva exige o papel "Gerente"; com
+ * "Gerenciador de conteúdo" a API responde 404 — o mesmo código de arquivo
+ * inexistente. A versão anterior tratava 404 como sucesso, então excluir um
+ * certificado apagava o registro no banco e deixava o .pfx no Drive sem
+ * nenhum aviso. Aqui o 404 deixa de ser presumido como sucesso: confirmamos
+ * o desfecho e, quando a exclusão não é permitida, mandamos para a lixeira.
+ */
 export async function deleteDriveFile(fileId: string): Promise<void> {
   const accessToken = await getGoogleAccessTokenCached();
+  const cabecalho = { Authorization: `Bearer ${accessToken}` };
 
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const exclusao = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+    { method: "DELETE", headers: cabecalho }
+  );
 
-  if (!response.ok && response.status !== 404) {
-    throw new Error(`Erro ao deletar arquivo: ${response.statusText}`);
+  if (exclusao.ok) return;
+
+  // Some o arquivo de fato ou apenas falta permissão? Uma leitura decide.
+  const verificacao = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,trashed,capabilities(canTrash)&supportsAllDrives=true`,
+    { headers: cabecalho }
+  );
+
+  // Já não existe: nada a fazer.
+  if (verificacao.status === 404) return;
+
+  if (!verificacao.ok) {
+    throw new Error(
+      `Nao foi possivel remover o arquivo ${fileId} do Drive (HTTP ${exclusao.status}).`
+    );
+  }
+
+  const info = await verificacao.json();
+  if (info.trashed) return;
+
+  if (!info.capabilities?.canTrash) {
+    throw new Error(
+      `Sem permissao para remover o arquivo ${fileId} do Drive. ` +
+        `Conceda o papel "Gerente" a conta de servico no Drive Compartilhado.`
+    );
+  }
+
+  const lixeira = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+    {
+      method: "PATCH",
+      headers: { ...cabecalho, "Content-Type": "application/json" },
+      body: JSON.stringify({ trashed: true }),
+    }
+  );
+
+  if (!lixeira.ok) {
+    throw new Error(`Falha ao mover o arquivo ${fileId} para a lixeira do Drive.`);
   }
 }
 
