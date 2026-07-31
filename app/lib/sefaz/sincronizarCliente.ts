@@ -344,6 +344,36 @@ async function gravarDocumento(
     });
   }
 
+  // O resumo perde a razão de existir quando o XML integral da mesma nota
+  // chega — são NSUs distintos, então ambos ficam gravados. Sem marcar o
+  // antigo, a mesma nota aparece duas vezes para quem consulta.
+  if (normalizado.completude === "completo" && normalizado.chave_acesso) {
+    await supabase
+      .from("documentos_fiscais")
+      .update({ status_processamento: "Substituido" })
+      .eq("cliente_id", cliente.id)
+      .eq("chave_acesso", normalizado.chave_acesso)
+      .eq("completude", "resumo");
+
+    // A pendência de manifestação também deixa de fazer sentido.
+    await supabase
+      .from("documentos_fiscais_pendencias")
+      .update({ status: "RESOLVIDA", resolvido_em: new Date().toISOString() })
+      .eq("cliente_id", cliente.id)
+      .eq("tipo_pendencia", "AGUARDA_MANIFESTACAO")
+      .in(
+        "documento_fiscal_id",
+        (
+          await supabase
+            .from("documentos_fiscais")
+            .select("id")
+            .eq("cliente_id", cliente.id)
+            .eq("chave_acesso", normalizado.chave_acesso)
+            .eq("completude", "resumo")
+        ).data?.map((d) => d.id) ?? []
+      );
+  }
+
   return true;
 }
 
