@@ -14,6 +14,10 @@ export function middleware(request: NextRequest) {
     '/api/setup',
     '/api/auth',
     '/api/dev',
+    // Chamada de agendador é servidor para servidor e não carrega cookie de
+    // sessão: sem esta exceção o middleware redireciona para /login e o cron
+    // nunca executa. A rota valida o CRON_SECRET por conta própria.
+    '/api/cron',
   ];
 
   // Extensões de arquivo estático que não precisam de autenticação

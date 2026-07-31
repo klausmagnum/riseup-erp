@@ -70,20 +70,29 @@ export async function sincronizarClienteNFe(params: {
 
   const cnpj = (cliente.identificacao ?? "").replace(/\D/g, "");
   if (cnpj.length !== 14) {
-    return {
-      ...base,
-      mensagem: `Cliente sem CNPJ valido (a distribuicao de DF-e nao atende CPF).`,
-    };
+    const mensagem = "Cliente sem CNPJ valido (a distribuicao de DF-e nao atende CPF).";
+
+    // Marca a tentativa para tirar da frente da fila. Pessoa fisica nunca vai
+    // passar daqui, e sem o carimbo voltaria ao topo em toda execucao.
+    await registrarEstado(supabase, cliente.id, base.ultimoNsu, "Erro", mensagem, false);
+
+    return { ...base, mensagem };
   }
 
   let credenciais;
   try {
     credenciais = await carregarCertificado(certificado);
   } catch (error) {
-    return {
-      ...base,
-      mensagem: error instanceof Error ? error.message : "Falha ao carregar certificado.",
-    };
+    const mensagem =
+      error instanceof Error ? error.message : "Falha ao carregar certificado.";
+
+    // Registrar mesmo em falha, e não apenas retornar: a fila é ordenada pela
+    // última sincronização com nulos primeiro. Sem gravar o carimbo, um cliente
+    // com certificado quebrado voltaria ao topo em toda execução e consumiria
+    // orçamento indefinidamente, atrasando os demais.
+    await registrarEstado(supabase, cliente.id, base.ultimoNsu, "Erro", mensagem, false);
+
+    return { ...base, mensagem };
   }
 
   let ultNSU = String(cliente.ultimo_nsu_nfe_recebida ?? 0);
