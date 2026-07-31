@@ -174,21 +174,32 @@ const respUp = await fetch(
   { method: "POST", headers: cab, body: form }
 );
 
-if (!respUp.ok) {
-  const erro = await respUp.json().catch(() => ({}));
-  const msg = erro.error?.message || respUp.statusText;
+// A partir daqui a pasta de teste existe no Drive. Toda saída passa por
+// limpar(), inclusive as de erro: sem isso uma falha no meio do caminho
+// deixava pasta órfã acumulando no Drive da cliente.
+async function limpar() {
   await fetch(`https://www.googleapis.com/drive/v3/files/${idTeste}?supportsAllDrives=true`, {
     method: "DELETE",
     headers: cab,
-  });
+  }).catch(() => {});
+}
+
+async function pararLimpando(mensagem, dica) {
+  await limpar();
+  parar(mensagem, dica);
+}
+
+if (!respUp.ok) {
+  const erro = await respUp.json().catch(() => ({}));
+  const msg = erro.error?.message || respUp.statusText;
 
   if (/quota/i.test(msg)) {
-    parar(
+    await pararLimpando(
       "Upload negado por falta de cota de armazenamento.",
       "A pasta precisa estar num Drive Compartilhado, nao no Meu Drive. Etapa 1 do guia."
     );
   }
-  parar(`Upload falhou: ${msg}`);
+  await pararLimpando(`Upload falhou: ${msg}`);
 }
 
 const { id: idArquivo } = await respUp.json();
@@ -198,18 +209,15 @@ console.log("  ok  4/5  subiu arquivo de teste");
 const respLer = await fetch(
   `https://www.googleapis.com/drive/v3/files/${idArquivo}?alt=media&supportsAllDrives=true`,
   { headers: cab }
-);
-const conteudo = await respLer.text();
+).catch(() => null);
+
+const conteudo = respLer ? await respLer.text() : "";
 
 if (conteudo !== "<teste>ok</teste>") {
-  parar(`O arquivo voltou diferente do que subiu: "${conteudo}"`);
+  await pararLimpando(`O arquivo voltou diferente do que subiu: "${conteudo}"`);
 }
 console.log("  ok  5/5  leu o arquivo de volta");
 
-// ---- Limpeza ----
-await fetch(`https://www.googleapis.com/drive/v3/files/${idTeste}?supportsAllDrives=true`, {
-  method: "DELETE",
-  headers: cab,
-});
+await limpar();
 
 console.log("\n  Google Drive configurado corretamente. Pasta de teste removida.\n");
