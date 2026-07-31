@@ -176,20 +176,23 @@ export async function GET(request: Request) {
 
   // Contagens para os cartões do topo. São consultas com head:true, que
   // devolvem só o número e não trafegam linha nenhuma.
-  function contar(filtro: (q: any) => any) {
+  function contar(igualdades: Record<string, string>) {
     let q = adminClient
       .from("documentos_fiscais")
       .select("id", { count: "exact", head: true })
       .is("deleted_at", null)
       .or("status_processamento.is.null,status_processamento.neq.Substituido");
+
     if (clienteId) q = q.eq("cliente_id", clienteId);
-    return filtro(q);
+    for (const [coluna, valor] of Object.entries(igualdades)) q = q.eq(coluna, valor);
+
+    return q;
   }
 
   const [notas, aguardando, eventos] = await Promise.all([
-    contar((q) => q.eq("tipo_documento", "NFe")),
-    contar((q) => q.eq("completude", "resumo")),
-    contar((q) => q.eq("tipo_documento", "EventoNFe")),
+    contar({ tipo_documento: "NFe" }),
+    contar({ completude: "resumo" }),
+    contar({ tipo_documento: "EventoNFe" }),
   ]);
 
   return NextResponse.json({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 interface Documento {
@@ -146,38 +146,49 @@ export default function DocumentosFiscaisTable({
     carregarClientes();
   }, []);
 
-  const carregar = useCallback(async () => {
-    setCarregando(true);
-    setErro("");
+  // A busca acontece dentro do efeito e só altera estado depois do await:
+  // mexer no estado de forma síncrona no corpo do efeito provoca renderização
+  // em cascata. Quem dispara a busca é que liga o indicador de carregamento.
+  useEffect(() => {
+    let ativo = true;
 
-    try {
-      const token = await pegarToken();
-      const params = new URLSearchParams({ pagina: String(pagina), tamanho: "50" });
-      if (tipo) params.set("tipo", tipo);
-      if (filtroCliente) params.set("clienteId", filtroCliente);
-      if (filtroCompletude) params.set("completude", filtroCompletude);
-      if (filtroDe) params.set("de", filtroDe);
-      if (filtroAte) params.set("ate", filtroAte);
-      if (buscaAplicada) params.set("busca", buscaAplicada);
-      if (mostrarSubstituidos) params.set("incluirSubstituidos", "1");
+    (async () => {
+      try {
+        const token = await pegarToken();
+        const params = new URLSearchParams({ pagina: String(pagina), tamanho: "50" });
+        if (tipo) params.set("tipo", tipo);
+        if (filtroCliente) params.set("clienteId", filtroCliente);
+        if (filtroCompletude) params.set("completude", filtroCompletude);
+        if (filtroDe) params.set("de", filtroDe);
+        if (filtroAte) params.set("ate", filtroAte);
+        if (buscaAplicada) params.set("busca", buscaAplicada);
+        if (mostrarSubstituidos) params.set("incluirSubstituidos", "1");
 
-      const resposta = await fetch(`/api/documentos-fiscais?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+        const resposta = await fetch(`/api/documentos-fiscais?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      const dados = await resposta.json();
-      if (!resposta.ok) throw new Error(dados.error || "Falha ao carregar documentos.");
+        const dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.error || "Falha ao carregar documentos.");
+        if (!ativo) return;
 
-      setDocumentos(dados.documentos ?? []);
-      setTotal(dados.total ?? 0);
-      setPaginas(dados.paginas ?? 1);
-      setResumo(dados.resumo ?? null);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro desconhecido.");
-      setDocumentos([]);
-    } finally {
-      setCarregando(false);
-    }
+        setDocumentos(dados.documentos ?? []);
+        setTotal(dados.total ?? 0);
+        setPaginas(dados.paginas ?? 1);
+        setResumo(dados.resumo ?? null);
+        setErro("");
+      } catch (e) {
+        if (!ativo) return;
+        setErro(e instanceof Error ? e.message : "Erro desconhecido.");
+        setDocumentos([]);
+      } finally {
+        if (ativo) setCarregando(false);
+      }
+    })();
+
+    return () => {
+      ativo = false;
+    };
   }, [
     pagina,
     tipo,
@@ -189,13 +200,10 @@ export default function DocumentosFiscaisTable({
     mostrarSubstituidos,
   ]);
 
-  useEffect(() => {
-    carregar();
-  }, [carregar]);
-
   // Trocar de filtro com a paginação avançada deixaria a tela numa página que
   // talvez nem exista no novo resultado.
   function aplicarFiltro(acao: () => void) {
+    setCarregando(true);
     setPagina(1);
     acao();
   }
