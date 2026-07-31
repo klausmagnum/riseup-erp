@@ -126,6 +126,11 @@ export async function deleteDriveFile(fileId: string): Promise<void> {
   }
 }
 
+// Pastas do Drive não mudam de id. Sem este cache, arquivar um lote de 50
+// documentos do mesmo cliente/mês dispara 200 buscas para resolver as mesmas
+// quatro pastas — foi o que fez a primeira sincronização levar 3,4 minutos.
+const cacheDePastas = new Map<string, string>();
+
 /**
  * Devolve o id da subpasta com esse nome, criando-a se ainda não existir.
  * Idempotente: a sincronização roda várias vezes por dia sobre as mesmas pastas.
@@ -134,6 +139,10 @@ export async function ensureDriveFolder(
   name: string,
   parentFolderId: string
 ): Promise<string> {
+  const chaveCache = `${parentFolderId}/${name}`;
+  const emCache = cacheDePastas.get(chaveCache);
+  if (emCache) return emCache;
+
   const accessToken = await getGoogleAccessTokenCached();
   const nomeEscapado = name.replace(/'/g, "\\'");
 
@@ -153,6 +162,7 @@ export async function ensureDriveFolder(
   if (busca.ok) {
     const data = await busca.json();
     if (data.files?.length > 0) {
+      cacheDePastas.set(chaveCache, data.files[0].id);
       return data.files[0].id;
     }
   }
@@ -178,6 +188,7 @@ export async function ensureDriveFolder(
   }
 
   const data = await criacao.json();
+  cacheDePastas.set(chaveCache, data.id);
   return data.id;
 }
 

@@ -157,9 +157,20 @@ export async function sincronizarClienteNFe(params: {
       encontrados += lote.documentos.length;
 
       for (const doc of lote.documentos) {
+        // Cada documento custa uma escrita no banco e um upload ao Drive. Sem
+        // conferir o prazo aqui, um lote de 50 rodava inteiro mesmo depois de
+        // estourado o orçamento — e o NSU só avançava no fim do lote.
+        if (Date.now() > params.deadline) {
+          interrompido = true;
+          break;
+        }
+
         try {
           const gravado = await gravarDocumento(supabase, cliente, doc, cnpj);
           if (gravado) importados += 1;
+          // Avança documento a documento: se a execução for cortada no meio do
+          // lote, a próxima retoma exatamente daqui em vez de reprocessar tudo.
+          ultNSU = doc.nsu || ultNSU;
         } catch (error) {
           erros += 1;
           console.error(
@@ -168,6 +179,8 @@ export async function sincronizarClienteNFe(params: {
           );
         }
       }
+
+      if (interrompido) break;
 
       ultNSU = lote.ultNSU || ultNSU;
 

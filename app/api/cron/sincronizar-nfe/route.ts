@@ -8,10 +8,10 @@ import {
 import type { RegistroCertificado } from "@/app/lib/sefaz/certificado";
 
 export const runtime = "nodejs";
-// 60s e o teto do plano Hobby da Vercel. Por isso cada execucao processa um
-// lote pequeno e para: a fila e ordenada pela ultima sincronizacao, entao a
-// chamada seguinte pega quem ficou para tras.
-export const maxDuration = 60;
+// Plano Pro. Mesmo com folga, a execução continua limitada por orçamento e a
+// fila é ordenada pela última sincronização: quem não couber nesta chamada
+// entra na próxima, sem reprocessar o que já foi lido.
+export const maxDuration = 300;
 
 /**
  * Sincronização automática de NF-e recebidas.
@@ -22,11 +22,10 @@ export const maxDuration = 60;
  */
 
 // Deixa folga para gravar o resumo antes de a função ser cortada.
-const RESERVA_FINAL_MS = 10_000;
+const RESERVA_FINAL_MS = 20_000;
 // Cada cliente recebe uma fatia, para um cliente com muito atraso não
-// monopolizar a execução inteira. Dentro de 60s isso dá 2 clientes por
-// chamada em média — daí a fila valer mais que a frequência do agendador.
-const ORCAMENTO_POR_CLIENTE_MS = 22_000;
+// monopolizar a execução inteira. Quem for interrompido retoma no NSU exato.
+const ORCAMENTO_POR_CLIENTE_MS = 60_000;
 
 function autorizado(request: Request) {
   const secret = process.env.CRON_SECRET;
