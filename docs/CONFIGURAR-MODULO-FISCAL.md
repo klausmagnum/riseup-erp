@@ -146,7 +146,16 @@ CERTIFICADO_ENCRYPTION_KEY=Uvw+0wP2BXDQ89EoUNdHJRZa5lS73v3FEnFMOUmAihNqMJa9I99Yo
 CRON_SECRET=63bfa35acc06fa3da6b52172d4224557c644e3e71d4ef0118462dee261131d7f
 GOOGLE_DRIVE_ROOT_FOLDER_ID=<o ID que você anotou na etapa 3>
 GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_B64=<cole o texto base64 da etapa 4>
+GOOGLE_DRIVE_CERTIFICADOS_FOLDER_ID=<ID da pasta Certificados>
 ```
+
+> **Sobre a pasta Certificados:** ela fica ao lado da pasta `Clientes`, dentro do
+> mesmo Drive Compartilhado. Separar não é capricho — é o material mais sensível
+> que o escritório guarda, e uma pasta própria permite restringir o acesso a ela
+> sem mexer no resto quando o Drive for compartilhado com a equipe.
+>
+> Se esta variável ficar vazia, os certificados caem soltos na pasta raiz, junto
+> com os documentos fiscais.
 
 > A `CERTIFICADO_ENCRYPTION_KEY` é o que embaralha as senhas dos certificados.
 > **Se ela for trocada depois, todas as senhas já salvas param de abrir** e os
