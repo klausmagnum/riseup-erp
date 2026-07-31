@@ -93,22 +93,44 @@ de linha — isso é o esperado.
 
 ---
 
-## Etapa 5 — Aplicar a migration no Supabase
+## Etapa 5 — Preparar o banco no Supabase
 
-1. Acesse [supabase.com/dashboard](https://supabase.com/dashboard) e abra o projeto do RiseUP
-2. No menu à esquerda, clique em **SQL Editor**
-3. Clique em **New query**
-4. Abra o arquivo abaixo no VS Code, copie **todo** o conteúdo e cole no editor:
+> **Concluída em 30/07/2026.** Conferido com `node scripts/verificar-banco.mjs`:
+> 20 de 20 colunas presentes.
 
-   `supabase/migrations/20260730120000_add_nsu_e_unicidade_documentos_fiscais.sql`
+**Este link abre direto o editor SQL do projeto, já na tela certa:**
 
-5. Clique em **Run** (ou Ctrl+Enter)
+https://supabase.com/dashboard/project/icbbqfgdlmcqvjixziar/sql/new
 
-Deve aparecer `Success. No rows returned`. Isso é sucesso — o script cria
-colunas e índices, não devolve dados.
+Clique na caixa de texto grande no meio da tela, cole o conteúdo de **cada
+arquivo abaixo** (um de cada vez) e clique no botão verde **Run**, no canto
+inferior direito:
 
-Rodar duas vezes por engano não causa problema: todos os comandos usam
+1. `supabase/migrations/20260703000000_add_nsu_columns_clientes.sql`
+2. `supabase/migrations/20260730120000_add_nsu_e_unicidade_documentos_fiscais.sql`
+
+**A resposta esperada é `Success. No rows returned`.** Isso é sucesso, mesmo
+parecendo que nada aconteceu: os comandos criam colunas e índices, não devolvem
+linhas para exibir.
+
+Rodar duas vezes por engano não causa problema — todos os comandos usam
 `if not exists`.
+
+### Conferindo
+
+```bash
+node scripts/verificar-banco.mjs
+```
+
+Deve terminar com `Banco completo`. Se listar alguma coluna faltando, é porque
+uma das migrations não foi aplicada — repita o passo acima com o arquivo
+correspondente.
+
+> **Por que duas migrations e não uma:** a primeira já existia no repositório
+> desde julho, mas nunca tinha sido aplicada no banco — o nome do arquivo estava
+> fora do padrão dos demais e ela passou despercebida. Sem as colunas dela a
+> sincronização não teria onde gravar até que ponto já leu de cada cliente. O
+> nome foi padronizado para não se repetir.
 
 ---
 
