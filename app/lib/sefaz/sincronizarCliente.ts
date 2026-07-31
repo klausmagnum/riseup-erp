@@ -32,9 +32,29 @@ export interface ResultadoSincronizacao {
  */
 const JANELA_BLOQUEIO_MS = 61 * 60 * 1000;
 
-function arquivoDoDocumento(chave: string, nsu: string, tipo: string) {
-  const base = chave || `${tipo}-nsu${nsu}`;
-  return `${base}.xml`;
+/**
+ * Nome do arquivo no Drive.
+ *
+ * A chave de acesso sozinha não serve: a mesma nota chega primeiro como resumo
+ * e depois como XML completo, e os eventos (cancelamento, carta de correção)
+ * repetem a chave da nota original. Como o Drive aceita nomes repetidos na
+ * mesma pasta, isso produzia arquivos visualmente idênticos e indistinguíveis.
+ *
+ *   34...44.xml               nota completa, o arquivo que vale para escrituração
+ *   34...44-resumo.xml        só o resumo, enquanto não houver manifestação
+ *   34...44-evento-nsu123.xml cada evento, individualizado pelo NSU
+ */
+function arquivoDoDocumento(doc: {
+  chave: string;
+  nsu: string;
+  tipo: string;
+  completude: "resumo" | "completo" | "evento";
+}) {
+  const base = doc.chave || `${doc.tipo}-nsu${doc.nsu}`;
+
+  if (doc.completude === "completo") return `${base}.xml`;
+  if (doc.completude === "resumo") return `${base}-resumo.xml`;
+  return `${base}-evento-nsu${doc.nsu}.xml`;
 }
 
 /**
@@ -249,7 +269,12 @@ async function gravarDocumento(
     });
 
     const upload = await uploadTextFile({
-      nome: arquivoDoDocumento(normalizado.chave_acesso, doc.nsu, normalizado.tipo_documento),
+      nome: arquivoDoDocumento({
+        chave: normalizado.chave_acesso,
+        nsu: doc.nsu,
+        tipo: normalizado.tipo_documento,
+        completude: normalizado.completude,
+      }),
       conteudo: doc.xml,
       parentFolderId: pasta,
     });
