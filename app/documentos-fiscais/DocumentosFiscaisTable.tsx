@@ -92,7 +92,14 @@ function SeloCompletude({ completude }: { completude: string | null }) {
   );
 }
 
-export default function DocumentosFiscaisTable({ tipo }: { tipo?: string }) {
+export default function DocumentosFiscaisTable({
+  tipo,
+  clienteInicial,
+}: {
+  tipo?: string;
+  /** Vem do link "ver todos" do painel, para a tela abrir já filtrada. */
+  clienteInicial?: string;
+}) {
   const [documentos, setDocumentos] = useState<Documento[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [resumo, setResumo] = useState<Resumo | null>(null);
@@ -102,7 +109,7 @@ export default function DocumentosFiscaisTable({ tipo }: { tipo?: string }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  const [filtroCliente, setFiltroCliente] = useState("");
+  const [filtroCliente, setFiltroCliente] = useState(clienteInicial ?? "");
   const [filtroCompletude, setFiltroCompletude] = useState("");
   const [filtroDe, setFiltroDe] = useState("");
   const [filtroAte, setFiltroAte] = useState("");

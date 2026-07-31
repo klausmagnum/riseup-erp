@@ -1,11 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import ErpChrome from "@/app/components/ErpChrome";
 import SyncNFeModal from "@/app/components/SyncNFeModal";
 import DocumentosFiscaisTable from "../DocumentosFiscaisTable";
 
 export const dynamic = "force-dynamic";
+
+/** useSearchParams exige Suspense no App Router; isolado aqui para não
+ *  suspender a página inteira. */
+function TabelaComCliente({ versao }: { versao: number }) {
+  const cliente = useSearchParams().get("cliente") ?? undefined;
+  return <DocumentosFiscaisTable key={`${versao}-${cliente ?? ""}`} clienteInicial={cliente} />;
+}
 
 export default function NfePage() {
   const [modalAberto, setModalAberto] = useState(false);
@@ -43,7 +51,9 @@ export default function NfePage() {
         </div>
       </header>
 
-      <DocumentosFiscaisTable key={versao} />
+      <Suspense fallback={<p className="mt-8 text-center text-sm text-sky-100">Carregando...</p>}>
+        <TabelaComCliente versao={versao} />
+      </Suspense>
 
       <SyncNFeModal
         isOpen={modalAberto}
