@@ -60,8 +60,16 @@ riseup-drive@riseup-erp-123456.iam.gserviceaccount.com
 1. Volte ao **Drive compartilhado** `TF - Documentos Fiscais`
 2. Clique no nome do drive no topo → **Gerenciar membros**
 3. Cole o e-mail da conta de serviço que você copiou
-4. Defina a permissão como **Gerenciador de conteúdo**
+4. Defina a permissão como **Gerente**
 5. Clique em **Enviar**
+
+> **Por que Gerente e não Gerenciador de conteúdo:** o papel de conteúdo permite
+> criar e ler, mas **não excluir definitivamente** — a API do Drive responde 404
+> nesse caso, o mesmo código de "arquivo não existe". Na prática, excluir um
+> certificado pelo sistema removeria o registro do banco e deixaria o arquivo
+> `.pfx` no Drive. Com "Gerente" a exclusão acontece de fato. Se preferir manter
+> o papel mais restrito, o sistema funciona igual, mas manda para a lixeira em
+> vez de excluir.
 
 Agora pegue o ID da pasta:
 
