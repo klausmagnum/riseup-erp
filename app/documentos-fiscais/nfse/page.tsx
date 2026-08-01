@@ -4,9 +4,9 @@ import FiscalModulePage from "../FiscalModulePage";
 
 export const dynamic = 'force-dynamic';
 
-// A sincronização automática de NFS-e ainda não está disponível: não existe
-// webservice nacional único e cada município (Natal, Parnamirim, Macaíba)
-// precisa de tratamento próprio. A listagem e a importação manual seguem ativas.
+// Esta tela ainda é maquete. A captura de NFS-e já funciona, pelo ambiente
+// nacional (app/lib/nfse/), e os documentos aparecem nos quadros da tela do
+// cliente, em Documentos Fiscais › Painel por cliente.
 export default function NfsePage() {
   return (
     <FiscalModulePage

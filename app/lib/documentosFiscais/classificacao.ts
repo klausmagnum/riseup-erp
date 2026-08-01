@@ -163,9 +163,13 @@ export function filtrarPorFamilia<T extends Filtravel<T>>(query: T, familia: str
   const f = familiaPorChave(familia);
   const semEventos = query.or(NAO_E_EVENTO);
 
-  // Posições 21-22 da chave de acesso, com o resto livre.
+  // Modelo nas posições 21-22 de uma chave de 44 dígitos. O padrão tem
+  // exatamente 44 caracteres e nenhum curinga de tamanho livre, o que exclui a
+  // chave da NFS-e — ela tem 50 dígitos, e as posições 21-22 dela não são o
+  // modelo do documento. Sem isso uma NFS-e cairia no quadro de NF-e por
+  // coincidência de dígitos.
   return f.modelo
-    ? semEventos.like("chave_acesso", `${"_".repeat(20)}${f.modelo}%`)
+    ? semEventos.like("chave_acesso", `${"_".repeat(20)}${f.modelo}${"_".repeat(22)}`)
     : semEventos.eq("tipo_documento", familia);
 }
 
