@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 type Situacao =
   | "ok"
   | "erro"
+  | "aguardando_janela"
   | "sem_certificado"
   | "certificado_vencendo"
   | "certificado_vencido"
@@ -27,6 +28,7 @@ interface ClientePainel {
   ultima_sincronizacao_nfe_status: string | null;
   mensagem_ultima_sincronizacao_nfe: string | null;
   proxima_sincronizacao_nfe: string | null;
+  proxima_sincronizacao_nfse: string | null;
   certificado_nome: string | null;
   certificado_validade: string | null;
   total_documentos: number;
@@ -53,6 +55,10 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITUACOES: Record<Situacao, { rotulo: string; classe: string }> = {
   ok: { rotulo: "Em dia", classe: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" },
   erro: { rotulo: "Com erro", classe: "border-rose-300/30 bg-rose-300/10 text-rose-200" },
+  aguardando_janela: {
+    rotulo: "Aguardando liberação",
+    classe: "border-slate-300/20 bg-slate-300/10 text-slate-300",
+  },
   sem_certificado: {
     rotulo: "Sem certificado",
     classe: "border-slate-300/20 bg-slate-300/10 text-slate-300",
@@ -240,13 +246,28 @@ export default function ClienteFiscalPage() {
               histórico de sincronização, com a data em que aconteceu. O selo
               no topo continua dizendo que houve erro. */}
 
-          {cliente.proxima_sincronizacao_nfe &&
-            new Date(cliente.proxima_sincronizacao_nfe) > new Date() && (
-              <div className="mt-4 rounded-lg border border-amber-300/25 bg-amber-300/10 px-3 py-3 text-xs text-amber-100">
-                A SEFAZ limita consultas repetidas. Este cliente volta a ser consultado
-                a partir de {momento(cliente.proxima_sincronizacao_nfe)}.
+          {/* Intervalo pedido pela origem não é problema: acontece quando não
+              há nota nova para buscar. O aviso é cinza de propósito. */}
+          {(() => {
+            const agora = new Date();
+            const proximas = [
+              { rotulo: "NF-e", quando: cliente.proxima_sincronizacao_nfe },
+              { rotulo: "NFS-e", quando: cliente.proxima_sincronizacao_nfse },
+            ].filter((p) => p.quando && new Date(p.quando) > agora);
+
+            if (proximas.length === 0) return null;
+
+            return (
+              <div className="mt-4 rounded-lg border border-slate-300/20 bg-slate-300/[0.06] px-3 py-3 text-xs text-slate-300">
+                A origem pede intervalo entre consultas quando não há documento novo — é
+                sinal de que este cliente está em dia, não de falha.{" "}
+                {proximas
+                  .map((p) => `${p.rotulo} volta a ser consultada em ${momento(p.quando)}`)
+                  .join("; ")}
+                .
               </div>
-            )}
+            );
+          })()}
 
           {!cliente.certificado_nome && (
             <div className="mt-4 rounded-lg border border-slate-300/20 bg-slate-300/[0.06] px-3 py-3 text-xs text-slate-300">

@@ -103,7 +103,9 @@ export async function sincronizarClienteNFSe(params: {
       lotes += 1;
 
       if (lote.bloqueado) {
-        await registrarEstado(supabase, cliente.id, ultNSU, "Erro", lote.mensagem, true);
+        // Mesmo raciocínio do 656 da SEFAZ: recusa por excesso de consultas é
+        // intervalo pedido, não falha, e não deve pintar o cliente de vermelho.
+        await registrarEstado(supabase, cliente.id, ultNSU, "Bloqueado", lote.mensagem, true);
         return {
           ...base,
           status: "Erro",

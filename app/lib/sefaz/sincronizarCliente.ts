@@ -142,7 +142,11 @@ export async function sincronizarClienteNFe(params: {
       ultimoMotivo = `${lote.cStat} - ${lote.xMotivo}`;
 
       if (lote.cStat === CSTAT.CONSUMO_INDEVIDO) {
-        await registrarEstado(supabase, cliente.id, ultNSU, "Erro", ultimoMotivo, true);
+        // Não é falha: a SEFAZ responde isso quando o CNPJ pergunta de novo
+        // sem ter nota nova, e pede uma hora de intervalo. Gravar como "Erro"
+        // fazia o painel marcar de vermelho justamente o cliente que estava em
+        // dia — ver ESTADO_BLOQUEADO em app/api/documentos-fiscais/painel.
+        await registrarEstado(supabase, cliente.id, ultNSU, "Bloqueado", ultimoMotivo, true);
         return {
           ...base,
           status: "Erro",

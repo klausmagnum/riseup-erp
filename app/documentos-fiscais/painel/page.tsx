@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 type Situacao =
   | "ok"
   | "erro"
+  | "aguardando_janela"
   | "sem_certificado"
   | "certificado_vencendo"
   | "certificado_vencido"
@@ -40,8 +41,10 @@ interface Resumo {
   comCertificado: number;
   semCertificado: number;
   comErro: number;
+  emDia: number;
   certificadoVencendo: number;
   nuncaSincronizado: number;
+  aguardandoJanela: number;
   documentosTotal: number;
   documentosRecentes: number;
   aguardandoManifestacao: number;
@@ -50,9 +53,16 @@ interface Resumo {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-const SITUACOES: Record<Situacao, { rotulo: string; classe: string }> = {
+const SITUACOES: Record<Situacao, { rotulo: string; classe: string; titulo?: string }> = {
   ok: { rotulo: "Em dia", classe: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" },
   erro: { rotulo: "Com erro", classe: "border-rose-300/30 bg-rose-300/10 text-rose-200" },
+  // Cinza de propósito: não pede ação de ninguém, ao contrário do vermelho.
+  aguardando_janela: {
+    rotulo: "Aguardando liberação",
+    classe: "border-slate-300/20 bg-slate-300/10 text-slate-300",
+    titulo:
+      "A origem pediu intervalo entre consultas — acontece justamente quando o cliente está em dia, sem nota nova para buscar. Volta sozinho no próximo horário.",
+  },
   sem_certificado: {
     rotulo: "Sem certificado",
     classe: "border-slate-300/20 bg-slate-300/10 text-slate-300",
@@ -153,6 +163,11 @@ export default function PainelFiscalPage() {
         { chave: "", rotulo: "Todos", quantidade: resumo.totalClientes },
         { chave: "erro", rotulo: "Com erro", quantidade: resumo.comErro },
         {
+          chave: "aguardando_janela",
+          rotulo: "Aguardando liberação",
+          quantidade: resumo.aguardandoJanela,
+        },
+        {
           chave: "certificado_vencendo",
           rotulo: "Certificado vencendo",
           quantidade: resumo.certificadoVencendo,
@@ -167,7 +182,7 @@ export default function PainelFiscalPage() {
           rotulo: "Sem certificado",
           quantidade: resumo.semCertificado,
         },
-        { chave: "ok", rotulo: "Em dia", quantidade: resumo.comCertificado - resumo.comErro },
+        { chave: "ok", rotulo: "Em dia", quantidade: resumo.emDia },
       ]
     : [];
 
@@ -332,6 +347,7 @@ export default function PainelFiscalPage() {
                       <td className="px-3 py-3">
                         <span
                           className={`inline-block whitespace-nowrap rounded-md border px-2 py-1 text-[10px] font-bold ${selo.classe}`}
+                          title={selo.titulo ?? c.mensagem_ultima_sincronizacao_nfe ?? ""}
                         >
                           {selo.rotulo}
                         </span>
