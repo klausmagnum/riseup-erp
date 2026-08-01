@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  filtrarPorDirecao,
+  filtrarPorFamilia,
+} from "@/app/lib/documentosFiscais/classificacao";
 
 export const runtime = "nodejs";
 
@@ -121,8 +125,37 @@ export async function GET(request: Request) {
   const tipo = params.get("tipo");
   if (tipo) query = query.eq("tipo_documento", tipo);
 
+  // Família e direção são os quadros da tela do cliente. A classificação segue
+  // a mesma regra da visão painel_fiscal_documentos_por_tipo, que produz a
+  // contagem exibida no quadro.
+  const familia = params.get("familia");
+  if (familia) query = filtrarPorFamilia(query, familia);
+
+  const direcao = params.get("direcao");
+  if (direcao) {
+    if (!clienteId) {
+      return NextResponse.json(
+        { error: "Entrada e saida dependem do cliente: informe clienteId." },
+        { status: 400 }
+      );
+    }
+
+    // Saída é o que o próprio cliente emitiu, então a comparação precisa do
+    // CNPJ do cadastro.
+    const { data: cliente } = await adminClient
+      .from("clientes")
+      .select("identificacao")
+      .eq("id", clienteId)
+      .maybeSingle();
+
+    query = filtrarPorDirecao(query, direcao, cliente?.identificacao);
+  }
+
+  // "indefinido" são os documentos gravados antes da coluna de completude
+  // existir: continuam capturados e precisam aparecer em algum lugar.
   const completude = params.get("completude");
-  if (completude) query = query.eq("completude", completude);
+  if (completude === "indefinido") query = query.is("completude", null);
+  else if (completude) query = query.eq("completude", completude);
 
   const de = params.get("de");
   if (de) query = query.gte("data_emissao", de);

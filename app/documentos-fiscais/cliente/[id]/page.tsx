@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import ErpChrome from "@/app/components/ErpChrome";
-import DocumentosFiscaisTable from "../../DocumentosFiscaisTable";
+import DocumentosCapturados from "../../DocumentosCapturados";
 
 export const dynamic = "force-dynamic";
 
@@ -236,12 +236,9 @@ export default function ClienteFiscalPage() {
             </div>
           </header>
 
-          {cliente.situacao === "erro" && cliente.mensagem_ultima_sincronizacao_nfe && (
-            <div className="mt-4 rounded-lg border border-rose-300/25 bg-rose-300/10 px-3 py-3 text-xs text-rose-100">
-              <strong className="font-black">A última sincronização falhou:</strong>{" "}
-              {cliente.mensagem_ultima_sincronizacao_nfe}
-            </div>
-          )}
+          {/* A mensagem da última falha não é repetida aqui: ela já está no
+              histórico de sincronização, com a data em que aconteceu. O selo
+              no topo continua dizendo que houve erro. */}
 
           {cliente.proxima_sincronizacao_nfe &&
             new Date(cliente.proxima_sincronizacao_nfe) > new Date() && (
@@ -296,7 +293,7 @@ export default function ClienteFiscalPage() {
           <h2 className="mt-7 text-sm font-black text-slate-100">
             Documentos capturados ({cliente.total_documentos})
           </h2>
-          <DocumentosFiscaisTable clienteInicial={cliente.cliente_id} />
+          <DocumentosCapturados clienteId={cliente.cliente_id} />
 
           <section className="mt-5 rounded-2xl border border-white/10 bg-[#061020]/88 p-4 shadow-2xl shadow-black/20">
             <button
