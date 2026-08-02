@@ -2,6 +2,7 @@ import { request as httpsRequest } from "node:https";
 import { gunzipSync } from "node:zlib";
 import { parseStringPromise } from "xml2js";
 import { getUfCode } from "./ufCodes";
+import { autoridadesComIcpBrasil } from "./icpBrasil";
 
 export type SefazEnvironment = "producao" | "homologacao";
 
@@ -38,6 +39,8 @@ interface DefinicaoServico {
   versao: string;
   /** O pedido leva a UF de quem consulta. A MDF-e não tem esse campo. */
   cUFAutor: boolean;
+  /** Servidor certificado pela ICP-Brasil, que não está nas CAs do Node. */
+  icpBrasil?: boolean;
   /** Elemento da consulta por chave, e a tag da chave dentro dele. */
   consultaChave: { elemento: string; chave: string } | null;
 }
@@ -93,6 +96,8 @@ const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
     cabecalho: "mdfeCabecMsg",
     versao: "1.00",
     cUFAutor: false,
+    // O servidor da SVRS é da cadeia da ICP-Brasil, que o Node não conhece.
+    icpBrasil: true,
     consultaChave: null,
   },
 };
@@ -210,7 +215,9 @@ function postSoap(
   action: string,
   envelope: string,
   certificado: CertificadoA1,
-  timeoutMs: number
+  timeoutMs: number,
+  /** CAs aceitas para o servidor. Vazio usa as que o Node já traz. */
+  autoridades?: string[]
 ): Promise<string> {
   const url = new URL(endpoint);
   const payload = Buffer.from(envelope, "utf8");
@@ -227,6 +234,7 @@ function postSoap(
         pfx: certificado.pfx,
         passphrase: certificado.senha,
         minVersion: "TLSv1.2",
+        ...(autoridades ? { ca: autoridades } : {}),
         headers: {
           "Content-Type": `application/soap+xml; charset=utf-8; action="${action}"`,
           "Content-Length": payload.length,
@@ -424,7 +432,8 @@ async function chamarDistribuicao(params: {
     params.certificado,
     // O serviço do CT-e respondeu 503 e timeout em tentativa recente; a folga
     // maior evita transformar instabilidade momentânea em erro do cliente.
-    params.timeoutMs ?? 60_000
+    params.timeoutMs ?? 60_000,
+    definicao.icpBrasil ? autoridadesComIcpBrasil() : undefined
   );
 
   return parseRetDistDFeInt(respostaXml);
