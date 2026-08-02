@@ -214,6 +214,9 @@ export async function normalizarDocumentoCTe(
         schema: doc.schema,
         nsu: doc.nsu,
         tpEvento: texto(evento.tpEvento),
+        // O tipo sozinho não identifica o evento: a sequência é que separa um
+        // segundo evento do mesmo tipo sobre o mesmo CT-e.
+        nSeqEvento: texto(evento.nSeqEvento),
       },
     };
   }

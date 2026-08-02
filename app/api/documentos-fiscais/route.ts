@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
+  filtrarEventosDaFamilia,
   filtrarPorDirecao,
   filtrarPorFamilia,
 } from "@/app/lib/documentosFiscais/classificacao";
@@ -209,23 +210,27 @@ export async function GET(request: Request) {
 
   // Contagens para os cartões do topo. São consultas com head:true, que
   // devolvem só o número e não trafegam linha nenhuma.
-  function contar(igualdades: Record<string, string>) {
-    let q = adminClient
+  function contar() {
+    const q = adminClient
       .from("documentos_fiscais")
       .select("id", { count: "exact", head: true })
       .is("deleted_at", null)
       .or("status_processamento.is.null,status_processamento.neq.Substituido");
 
-    if (clienteId) q = q.eq("cliente_id", clienteId);
-    for (const [coluna, valor] of Object.entries(igualdades)) q = q.eq(coluna, valor);
-
-    return q;
+    return clienteId ? q.eq("cliente_id", clienteId) : q;
   }
 
+  // Os cartões acompanham a família da tela: numa tela de NFC-e, contar NF-e
+  // daria um número que não tem relação com nenhuma linha da listagem.
+  const notasDaFamilia = () =>
+    familia ? filtrarPorFamilia(contar(), familia) : contar().eq("tipo_documento", "NFe");
+
   const [notas, aguardando, eventos] = await Promise.all([
-    contar({ tipo_documento: "NFe" }),
-    contar({ completude: "resumo" }),
-    contar({ tipo_documento: "EventoNFe" }),
+    notasDaFamilia(),
+    notasDaFamilia().eq("completude", "resumo"),
+    familia
+      ? filtrarEventosDaFamilia(contar(), familia)
+      : contar().eq("tipo_documento", "EventoNFe"),
   ]);
 
   return NextResponse.json({

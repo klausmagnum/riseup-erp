@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buscarLoteDFe, CSTAT, type SefazEnvironment } from "./distribuicaoDFe";
 import { normalizarDocumentoCTe } from "./parseCTe";
 import { carregarCertificado, type RegistroCertificado } from "./certificado";
-import { ensureDocumentoFolder, uploadTextFile } from "../googleDriveServer";
+import { gravarDocumentoCapturado } from "./gravarDocumento";
 import type { ClienteSincronizavel, ResultadoSincronizacao } from "./sincronizarCliente";
 
 /**
@@ -173,20 +173,6 @@ export async function sincronizarClienteCTe(params: {
   return { ...base, status, encontrados, importados, erros, ultimoNsu: ultNSU, mensagem };
 }
 
-/** Eventos repetem a chave do CT-e a que se referem, então o NSU é o que os
- *  distingue no Drive. */
-function arquivoDoDocumento(doc: {
-  chave: string;
-  nsu: string;
-  tipo: string;
-  completude: "resumo" | "completo" | "evento";
-}) {
-  const base = doc.chave || `${doc.tipo}-nsu${doc.nsu}`;
-  if (doc.completude === "completo") return `${base}.xml`;
-  if (doc.completude === "resumo") return `${base}-resumo.xml`;
-  return `${base}-evento-nsu${doc.nsu}.xml`;
-}
-
 async function gravarDocumento(
   supabase: SupabaseClient,
   cliente: ClienteSincronizavelCTe,
@@ -200,104 +186,17 @@ async function gravarDocumento(
 
   if (!normalizado) return false;
 
-  const jaExiste = await supabase
-    .from("documentos_fiscais")
-    .select("id")
-    .eq("cliente_id", cliente.id)
-    .eq("origem", ORIGEM_CTE)
-    .eq("nsu", doc.nsu)
-    .maybeSingle();
-
-  if (jaExiste.data) return false;
-
-  const referencia = normalizado.data_emissao ?? new Date().toISOString().slice(0, 10);
-  const [ano, mes] = referencia.split("-");
-
-  let driveFileId: string | null = null;
-  let xmlPath: string | null = null;
-
-  try {
-    const pasta = await ensureDocumentoFolder({
-      nomeCliente: cliente.razao_social,
-      tipoDocumento: normalizado.tipo_documento,
-      ano,
-      mes,
-    });
-
-    const upload = await uploadTextFile({
-      nome: arquivoDoDocumento({
-        chave: normalizado.chave_acesso,
-        nsu: doc.nsu,
-        tipo: normalizado.tipo_documento,
-        completude: normalizado.completude,
-      }),
-      conteudo: doc.xml,
-      parentFolderId: pasta,
-    });
-
-    driveFileId = upload.id;
-    xmlPath = upload.webViewLink;
-  } catch (error) {
-    console.error(
-      `[drive] falha ao arquivar CT-e nsu=${doc.nsu} do cliente ${cliente.id}:`,
-      error instanceof Error ? error.message : error
-    );
-  }
-
-  const { data: inserido, error } = await supabase
-    .from("documentos_fiscais")
-    .insert({
-      cliente_id: cliente.id,
-      tipo_documento: normalizado.tipo_documento,
-      numero: normalizado.numero,
-      serie: normalizado.serie,
-      chave_acesso: normalizado.chave_acesso,
-      data_emissao: normalizado.data_emissao,
-      valor_total: normalizado.valor_total,
-      emitente_cnpj_cpf: normalizado.emitente_cnpj_cpf,
-      emitente_nome: normalizado.emitente_nome,
-      destinatario_cnpj_cpf: normalizado.destinatario_cnpj_cpf,
-      destinatario_nome: normalizado.destinatario_nome,
-      municipio: normalizado.municipio,
-      uf: normalizado.uf,
-      status_documento: normalizado.status_documento,
-      origem: ORIGEM_CTE,
-      nsu: doc.nsu,
-      completude: normalizado.completude,
-      drive_file_id: driveFileId,
-      xml_storage_path: xmlPath,
-      json_dados: normalizado.json_dados,
-      possui_pendencia: !driveFileId || normalizado.completude === "resumo",
-      status_processamento: "Importado",
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    if (error.code === "23505") return false;
-    throw new Error(`Falha ao gravar CT-e NSU ${doc.nsu}: ${error.message}`);
-  }
-
-  if (!driveFileId && inserido) {
-    await supabase.from("documentos_fiscais_pendencias").insert({
-      documento_fiscal_id: inserido.id,
-      cliente_id: cliente.id,
-      tipo_pendencia: "ARQUIVAMENTO",
-      descricao: "XML do CT-e nao foi arquivado no Google Drive; reprocessar.",
-    });
-  }
-
-  // Como na NF-e, o XML integral torna o resumo da mesma chave obsoleto.
-  if (normalizado.completude === "completo" && normalizado.chave_acesso) {
-    await supabase
-      .from("documentos_fiscais")
-      .update({ status_processamento: "Substituido" })
-      .eq("cliente_id", cliente.id)
-      .eq("chave_acesso", normalizado.chave_acesso)
-      .eq("completude", "resumo");
-  }
-
-  return true;
+  return gravarDocumentoCapturado({
+    supabase,
+    cliente,
+    documento: normalizado,
+    xml: doc.xml,
+    origem: ORIGEM_CTE,
+    nsu: doc.nsu,
+    // O CT-e não tem manifestação do destinatário: abrir a pendência mandaria o
+    // escritório a uma tela da SEFAZ que não existe para esse documento.
+    registrarPendenciaDeManifestacao: false,
+  });
 }
 
 async function registrarEstado(

@@ -94,9 +94,13 @@ function SeloCompletude({ completude }: { completude: string | null }) {
 
 export default function DocumentosFiscaisTable({
   tipo,
+  familia,
   clienteInicial,
 }: {
   tipo?: string;
+  /** NF-e e NFC-e são a mesma família de schema e só o modelo da chave as
+   *  separa, então a tela de cada uma filtra por família, não por tipo. */
+  familia?: string;
   /** Vem do link "ver todos" do painel, para a tela abrir já filtrada. */
   clienteInicial?: string;
 }) {
@@ -157,6 +161,7 @@ export default function DocumentosFiscaisTable({
         const token = await pegarToken();
         const params = new URLSearchParams({ pagina: String(pagina), tamanho: "50" });
         if (tipo) params.set("tipo", tipo);
+        if (familia) params.set("familia", familia);
         if (filtroCliente) params.set("clienteId", filtroCliente);
         if (filtroCompletude) params.set("completude", filtroCompletude);
         if (filtroDe) params.set("de", filtroDe);
@@ -192,6 +197,7 @@ export default function DocumentosFiscaisTable({
   }, [
     pagina,
     tipo,
+    familia,
     filtroCliente,
     filtroCompletude,
     filtroDe,

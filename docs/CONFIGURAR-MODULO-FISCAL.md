@@ -192,6 +192,20 @@ Deve terminar com `37 passaram, 0 falharam`. Esse teste não depende de nenhuma
 configuração acima — ele confirma que a leitura dos documentos da SEFAZ está
 correta. Se falhar, o problema é no código, não na sua configuração.
 
+Há um verificador por família de documento, todos sem rede e sem certificado:
+
+```bash
+npx tsx scripts/verificar-nfse.mts
+```
+
+```bash
+npx tsx scripts/verificar-cte.mts
+```
+
+```bash
+npx tsx scripts/verificar-nfce.mts
+```
+
 Para testar de ponta a ponta é preciso um certificado A1 cadastrado. Aí sim:
 
 1. Suba o RiseUP local (`npm run dev`)
@@ -232,6 +246,47 @@ quantos documentos vieram e o que deu errado.
 
 ---
 
+## NFC-e: por que não existe "Sincronizar NFC-e"
+
+NF-e, NFS-e e CT-e chegam sozinhas porque cada uma tem uma **fila** no ambiente
+nacional: o sistema pergunta "o que há de novo para este CNPJ?", pagina até
+esvaziar e guarda onde parou. É isso que o cron faz quatro vezes por dia.
+
+**A NFC-e não tem fila.** O modelo 65 é a venda a consumidor, autorizada na
+SEFAZ estadual, e o ambiente nacional não a distribui — não existe serviço que
+devolva "todas as NFC-e do CNPJ no mês". Não é limitação do RiseUP: não há de
+onde puxar. Confirmado no ambiente real — a fila da NF-e nunca devolveu um
+modelo 65.
+
+O que existe é a **consulta por chave**, e é ela que a tela usa:
+
+1. **Documentos Fiscais → NFC-e → Capturar por chave**
+2. Cole as chaves — uma por linha, ou coladas de uma planilha, com ou sem
+   espaços. O sistema reconhece qualquer bloco de 44 dígitos e ignora o resto.
+3. Deixe o cliente em branco quando forem **NFC-e emitidas pelo cliente**: a
+   chave já traz o CNPJ do emitente e o sistema acha o cliente sozinho. Para
+   nota **de entrada**, escolha o cliente — a chave só nomeia quem emitiu.
+
+Cada chave vira uma consulta com o certificado do cliente. O XML integral é
+arquivado no Drive, na pasta **NFC-e** do cliente, e a nota entra na listagem e
+nos quadros do painel como qualquer outra.
+
+De onde tirar as chaves: do relatório do PDV do cliente, do portal da SEFAZ
+estadual ou do próprio cupom. Antes de consultar, o sistema confere o dígito
+verificador de cada chave — chave digitada errado é recusada na hora, sem
+gastar consulta na SEFAZ.
+
+Pela linha de comando, para lote grande:
+
+```bash
+npx tsx scripts/capturar-chave.mts --cnpj 49039801000150 --arquivo chaves.txt
+```
+
+O mesmo caminho serve para resgatar uma NF-e ou um CT-e avulso — a consulta
+aceita qualquer modelo, e escolhe o serviço certo pela própria chave.
+
+---
+
 ## Se algo der errado
 
 | Mensagem | O que significa | O que fazer |
@@ -242,3 +297,6 @@ quantos documentos vieram e o que deu errado.
 | `Segredo criptografado invalido` | A `CERTIFICADO_ENCRYPTION_KEY` mudou | Recadastrar as senhas dos certificados |
 | `mac verify failure` | Senha do certificado incorreta | Recadastrar o certificado com a senha certa |
 | `Certificado ... venceu em ...` | Certificado A1 vencido | Cadastrar o novo certificado do cliente |
+| `Chave com digito verificador invalido` | A chave foi copiada errado | Conferir os 44 dígitos; a consulta nem chegou a sair |
+| `Nenhum cliente cadastrado com o CNPJ ...` | A chave é de emitente que não é cliente | É nota de entrada: escolher o cliente na tela |
+| `SEFAZ respondeu 137` na consulta por chave | A SEFAZ não devolveu documento para essa chave | Conferir se o cliente é parte da nota; a SEFAZ só entrega a quem é |

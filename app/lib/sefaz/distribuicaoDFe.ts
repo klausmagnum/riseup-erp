@@ -7,12 +7,18 @@ export type SefazEnvironment = "producao" | "homologacao";
 
 /**
  * A SEFAZ tem um serviço de distribuição por família de documento: o da NF-e
- * entrega apenas modelos 55/65, e o do CT-e (NT 2015.002) apenas 57/67. São o
- * mesmo protocolo — distDFeInt paginado por NSU, docZip em base64+gzip — com
- * endpoint, namespace, ação SOAP e versão de schema próprios.
+ * atende os modelos 55/65, e o do CT-e (NT 2015.002) os modelos 57/67. São o
+ * mesmo protocolo — distDFeInt, docZip em base64+gzip — com endpoint,
+ * namespace, ação SOAP e versão de schema próprios.
+ *
+ * Cada serviço aceita dois critérios: a fila por NSU, que varre tudo que a
+ * origem tem para o CNPJ, e a consulta de uma chave de acesso avulsa.
  *
  * Verificado contra o ambiente real: a distribuição da NF-e nunca devolveu um
- * CT-e, e o serviço do CT-e só aceita a versão 1.00 do distDFeInt.
+ * CT-e, e o serviço do CT-e só aceita a versão 1.00 do distDFeInt. A fila da
+ * NF-e também nunca devolveu modelo 65 — a NFC-e é autorizada na SEFAZ
+ * estadual e não entra na fila nacional, e por isso só se chega a ela pela
+ * consulta por chave.
  */
 export type ServicoDistribuicao = "nfe" | "cte";
 
@@ -26,6 +32,8 @@ interface DefinicaoServico {
   resposta: string;
   resultado: string;
   versao: string;
+  /** Elemento da consulta por chave, e a tag da chave dentro dele. */
+  consultaChave: { elemento: string; chave: string };
 }
 
 const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
@@ -44,6 +52,7 @@ const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
     resposta: "nfeDistDFeInteresseResponse",
     resultado: "nfeDistDFeInteresseResult",
     versao: "1.01",
+    consultaChave: { elemento: "consChNFe", chave: "chNFe" },
   },
   cte: {
     endpoints: {
@@ -58,6 +67,7 @@ const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
     resposta: "cteDistDFeInteresseResponse",
     resultado: "cteDistDFeInteresseResult",
     versao: "1.00",
+    consultaChave: { elemento: "consChCTe", chave: "chCTe" },
   },
 };
 
@@ -95,16 +105,30 @@ export interface CertificadoA1 {
   senha: string;
 }
 
+/**
+ * O distDFeInt aceita um critério de busca por vez: ou a fila por NSU, que
+ * varre tudo que a origem tem para o CNPJ, ou uma chave de acesso específica.
+ */
+export type CriterioBusca =
+  | { tipo: "fila"; ultNSU: string }
+  | { tipo: "chave"; chave: string };
+
 function montarEnvelope(params: {
   servico: DefinicaoServico;
   ambiente: SefazEnvironment;
   cnpj: string;
   cUFAutor: number;
-  ultNSU: string;
+  criterio: CriterioBusca;
 }) {
-  const { servico } = params;
+  const { servico, criterio } = params;
   const tpAmb = params.ambiente === "producao" ? "1" : "2";
-  const ultNSU = params.ultNSU.padStart(15, "0");
+
+  const busca =
+    criterio.tipo === "fila"
+      ? `<distNSU><ultNSU>${criterio.ultNSU.padStart(15, "0")}</ultNSU></distNSU>`
+      : `<${servico.consultaChave.elemento}>` +
+        `<${servico.consultaChave.chave}>${criterio.chave}</${servico.consultaChave.chave}>` +
+        `</${servico.consultaChave.elemento}>`;
 
   // O distDFeInt vai como conteúdo literal dentro do elemento de dados.
   const distDFeInt =
@@ -112,7 +136,7 @@ function montarEnvelope(params: {
     `<tpAmb>${tpAmb}</tpAmb>` +
     `<cUFAutor>${params.cUFAutor}</cUFAutor>` +
     `<CNPJ>${params.cnpj}</CNPJ>` +
-    `<distNSU><ultNSU>${ultNSU}</ultNSU></distNSU>` +
+    busca +
     `</distDFeInt>`;
 
   return (
@@ -256,6 +280,53 @@ export async function buscarLoteDFe(params: {
   /** Família do documento. Cada uma tem seu serviço; ver SERVICOS. */
   servico?: ServicoDistribuicao;
 }): Promise<ResultadoDistribuicao> {
+  return chamarDistribuicao({
+    ...params,
+    criterio: { tipo: "fila", ultNSU: params.ultNSU || "0" },
+  });
+}
+
+/**
+ * Busca uma chave de acesso específica, sem passar pela fila de NSU.
+ *
+ * É o único caminho nacional para a NFC-e: o modelo 65 não é distribuído por
+ * NSU — a venda a consumidor é autorizada na SEFAZ estadual e não entra na fila
+ * do ambiente nacional. Quem tem a chave (do PDV, do portal estadual, do DANFE)
+ * chega ao XML integral por aqui.
+ *
+ * A SEFAZ só entrega a quem é parte do documento, e a autenticação é o próprio
+ * certificado: pedir a chave de um terceiro é recusado com cStat próprio, que
+ * devolvemos como veio em vez de traduzir para "erro".
+ */
+export async function consultarChaveDFe(params: {
+  cnpj: string;
+  uf: string;
+  chave: string;
+  certificado: CertificadoA1;
+  ambiente?: SefazEnvironment;
+  timeoutMs?: number;
+  servico?: ServicoDistribuicao;
+}): Promise<ResultadoDistribuicao> {
+  const chave = params.chave.replace(/\D/g, "");
+
+  if (chave.length !== 44) {
+    throw new Error(
+      `Chave de acesso deve ter 44 digitos; recebida com ${chave.length}: "${params.chave}".`
+    );
+  }
+
+  return chamarDistribuicao({ ...params, criterio: { tipo: "chave", chave } });
+}
+
+async function chamarDistribuicao(params: {
+  cnpj: string;
+  uf: string;
+  criterio: CriterioBusca;
+  certificado: CertificadoA1;
+  ambiente?: SefazEnvironment;
+  timeoutMs?: number;
+  servico?: ServicoDistribuicao;
+}): Promise<ResultadoDistribuicao> {
   const ambiente = params.ambiente ?? "producao";
   const servico = params.servico ?? "nfe";
   const definicao = SERVICOS[servico];
@@ -270,7 +341,7 @@ export async function buscarLoteDFe(params: {
     ambiente,
     cnpj,
     cUFAutor: getUfCode(params.uf),
-    ultNSU: params.ultNSU || "0",
+    criterio: params.criterio,
   });
 
   const respostaXml = await postSoap(

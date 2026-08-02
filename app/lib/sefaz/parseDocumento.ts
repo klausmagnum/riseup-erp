@@ -52,6 +52,19 @@ export function destrincharChave(chave: string) {
   };
 }
 
+/**
+ * Tipo gravado a partir do modelo na chave.
+ *
+ * NF-e e NFC-e compartilham schema, serviço e parser — o que as separa é o
+ * modelo, 55 contra 65. O tipo importa porque é ele que escolhe a pasta do
+ * Drive: sem isso a venda ao consumidor era arquivada junto das notas de
+ * mercadoria, e a pasta NFC-e ficava vazia para sempre.
+ */
+function tipoPeloModelo(modelo: string, evento: boolean) {
+  const familia = modelo === "65" ? "NFCe" : "NFe";
+  return evento ? `Evento${familia}` : familia;
+}
+
 function texto(valor: unknown): string {
   if (valor === null || valor === undefined) return "";
   if (typeof valor === "string") return valor;
@@ -110,7 +123,8 @@ export async function normalizarDocumento(
     const daChave = destrincharChave(chave);
 
     return {
-      tipo_documento: "NFe",
+      // O mod do ide é a fonte primária; a chave cobre o XML que não o traga.
+      tipo_documento: tipoPeloModelo(texto(ide.mod) || daChave.modelo, false),
       numero: texto(ide.nNF) || daChave.numero,
       serie: texto(ide.serie) || daChave.serie,
       chave_acesso: chave,
@@ -136,7 +150,7 @@ export async function normalizarDocumento(
     const daChave = destrincharChave(chave);
 
     return {
-      tipo_documento: "NFe",
+      tipo_documento: tipoPeloModelo(daChave.modelo, false),
       numero: daChave.numero,
       serie: daChave.serie,
       chave_acesso: chave,
@@ -168,7 +182,7 @@ export async function normalizarDocumento(
     const daChave = destrincharChave(chave);
 
     return {
-      tipo_documento: "EventoNFe",
+      tipo_documento: tipoPeloModelo(daChave.modelo, true),
       numero: daChave.numero,
       serie: daChave.serie,
       chave_acesso: chave,
@@ -186,6 +200,10 @@ export async function normalizarDocumento(
         schema: doc.schema,
         nsu: doc.nsu,
         tpEvento: texto(evento.tpEvento),
+        // Duas cartas de correção da mesma nota têm o mesmo tipo e só a
+        // sequência as distingue. Sem ela, a segunda passaria por repetição da
+        // primeira na deduplicação.
+        nSeqEvento: texto(evento.nSeqEvento),
       },
     };
   }

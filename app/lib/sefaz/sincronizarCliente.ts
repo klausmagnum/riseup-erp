@@ -2,7 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buscarLoteDFe, CSTAT, type SefazEnvironment } from "./distribuicaoDFe";
 import { normalizarDocumento } from "./parseDocumento";
 import { carregarCertificado, type RegistroCertificado } from "./certificado";
-import { ensureDocumentoFolder, uploadTextFile } from "../googleDriveServer";
+import { gravarDocumentoCapturado } from "./gravarDocumento";
+
+/** Fila da distribuição da NF-e. Identifica o fluxo na deduplicação. */
+export const ORIGEM_NFE = "SEFAZ/DistribuicaoDFe";
 
 export interface ClienteSincronizavel {
   id: string;
@@ -31,31 +34,6 @@ export interface ResultadoSincronizacao {
  * CNPJ por 1 hora. Respeitamos essa janela no agendamento.
  */
 const JANELA_BLOQUEIO_MS = 61 * 60 * 1000;
-
-/**
- * Nome do arquivo no Drive.
- *
- * A chave de acesso sozinha não serve: a mesma nota chega primeiro como resumo
- * e depois como XML completo, e os eventos (cancelamento, carta de correção)
- * repetem a chave da nota original. Como o Drive aceita nomes repetidos na
- * mesma pasta, isso produzia arquivos visualmente idênticos e indistinguíveis.
- *
- *   34...44.xml               nota completa, o arquivo que vale para escrituração
- *   34...44-resumo.xml        só o resumo, enquanto não houver manifestação
- *   34...44-evento-nsu123.xml cada evento, individualizado pelo NSU
- */
-function arquivoDoDocumento(doc: {
-  chave: string;
-  nsu: string;
-  tipo: string;
-  completude: "resumo" | "completo" | "evento";
-}) {
-  const base = doc.chave || `${doc.tipo}-nsu${doc.nsu}`;
-
-  if (doc.completude === "completo") return `${base}.xml`;
-  if (doc.completude === "resumo") return `${base}-resumo.xml`;
-  return `${base}-evento-nsu${doc.nsu}.xml`;
-}
 
 /**
  * Sincroniza um cliente, paginando pelo NSU até esgotar a distribuição ou o
@@ -249,136 +227,14 @@ async function gravarDocumento(
   // Schema que não interessa ao módulo — só avançamos o NSU.
   if (!normalizado) return false;
 
-  const jaExiste = await supabase
-    .from("documentos_fiscais")
-    .select("id")
-    .eq("cliente_id", cliente.id)
-    .eq("nsu", doc.nsu)
-    .maybeSingle();
-
-  if (jaExiste.data) return false;
-
-  const referencia = normalizado.data_emissao ?? new Date().toISOString().slice(0, 10);
-  const [ano, mes] = referencia.split("-");
-
-  let driveFileId: string | null = null;
-  let xmlPath: string | null = null;
-
-  try {
-    const pasta = await ensureDocumentoFolder({
-      nomeCliente: cliente.razao_social,
-      tipoDocumento: normalizado.tipo_documento,
-      ano,
-      mes,
-    });
-
-    const upload = await uploadTextFile({
-      nome: arquivoDoDocumento({
-        chave: normalizado.chave_acesso,
-        nsu: doc.nsu,
-        tipo: normalizado.tipo_documento,
-        completude: normalizado.completude,
-      }),
-      conteudo: doc.xml,
-      parentFolderId: pasta,
-    });
-
-    driveFileId = upload.id;
-    xmlPath = upload.webViewLink;
-  } catch (error) {
-    // O arquivamento no Drive falhar não pode fazer perder o registro fiscal:
-    // gravamos assim mesmo e marcamos pendência.
-    console.error(
-      `[drive] falha ao arquivar nsu=${doc.nsu} do cliente ${cliente.id}:`,
-      error instanceof Error ? error.message : error
-    );
-  }
-
-  const { data: inserido, error } = await supabase
-    .from("documentos_fiscais")
-    .insert({
-      cliente_id: cliente.id,
-      tipo_documento: normalizado.tipo_documento,
-      numero: normalizado.numero,
-      serie: normalizado.serie,
-      chave_acesso: normalizado.chave_acesso,
-      data_emissao: normalizado.data_emissao,
-      valor_total: normalizado.valor_total,
-      emitente_cnpj_cpf: normalizado.emitente_cnpj_cpf,
-      emitente_nome: normalizado.emitente_nome,
-      destinatario_cnpj_cpf: normalizado.destinatario_cnpj_cpf,
-      destinatario_nome: normalizado.destinatario_nome,
-      municipio: normalizado.municipio,
-      uf: normalizado.uf,
-      status_documento: normalizado.status_documento,
-      origem: "SEFAZ/DistribuicaoDFe",
-      nsu: doc.nsu,
-      completude: normalizado.completude,
-      drive_file_id: driveFileId,
-      xml_storage_path: xmlPath,
-      json_dados: normalizado.json_dados,
-      possui_pendencia: !driveFileId || normalizado.completude === "resumo",
-      status_processamento: "Importado",
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    // Corrida entre execuções simultâneas: o índice único resolveu, seguimos.
-    if (error.code === "23505") return false;
-    throw new Error(`Falha ao gravar documento NSU ${doc.nsu}: ${error.message}`);
-  }
-
-  if (!driveFileId && inserido) {
-    await supabase.from("documentos_fiscais_pendencias").insert({
-      documento_fiscal_id: inserido.id,
-      cliente_id: cliente.id,
-      tipo_pendencia: "ARQUIVAMENTO",
-      descricao: "XML nao foi arquivado no Google Drive; reprocessar.",
-    });
-  }
-
-  if (normalizado.completude === "resumo" && inserido) {
-    await supabase.from("documentos_fiscais_pendencias").insert({
-      documento_fiscal_id: inserido.id,
-      cliente_id: cliente.id,
-      tipo_pendencia: "AGUARDA_MANIFESTACAO",
-      descricao:
-        "Recebido apenas o resumo. O XML completo exige manifestacao do destinatario (Ciencia da Operacao).",
-    });
-  }
-
-  // O resumo perde a razão de existir quando o XML integral da mesma nota
-  // chega — são NSUs distintos, então ambos ficam gravados. Sem marcar o
-  // antigo, a mesma nota aparece duas vezes para quem consulta.
-  if (normalizado.completude === "completo" && normalizado.chave_acesso) {
-    await supabase
-      .from("documentos_fiscais")
-      .update({ status_processamento: "Substituido" })
-      .eq("cliente_id", cliente.id)
-      .eq("chave_acesso", normalizado.chave_acesso)
-      .eq("completude", "resumo");
-
-    // A pendência de manifestação também deixa de fazer sentido.
-    await supabase
-      .from("documentos_fiscais_pendencias")
-      .update({ status: "RESOLVIDA", resolvido_em: new Date().toISOString() })
-      .eq("cliente_id", cliente.id)
-      .eq("tipo_pendencia", "AGUARDA_MANIFESTACAO")
-      .in(
-        "documento_fiscal_id",
-        (
-          await supabase
-            .from("documentos_fiscais")
-            .select("id")
-            .eq("cliente_id", cliente.id)
-            .eq("chave_acesso", normalizado.chave_acesso)
-            .eq("completude", "resumo")
-        ).data?.map((d) => d.id) ?? []
-      );
-  }
-
-  return true;
+  return gravarDocumentoCapturado({
+    supabase,
+    cliente,
+    documento: normalizado,
+    xml: doc.xml,
+    origem: ORIGEM_NFE,
+    nsu: doc.nsu,
+  });
 }
 
 async function registrarEstado(

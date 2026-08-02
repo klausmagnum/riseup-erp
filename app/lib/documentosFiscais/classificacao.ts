@@ -169,8 +169,29 @@ export function filtrarPorFamilia<T extends Filtravel<T>>(query: T, familia: str
   // modelo do documento. Sem isso uma NFS-e cairia no quadro de NF-e por
   // coincidência de dígitos.
   return f.modelo
-    ? semEventos.like("chave_acesso", `${"_".repeat(20)}${f.modelo}${"_".repeat(22)}`)
+    ? semEventos.like("chave_acesso", padraoDoModelo(f.modelo))
     : semEventos.eq("tipo_documento", familia);
+}
+
+/** Padrão de LIKE que casa o modelo nas posições 21-22 de uma chave de 44. */
+function padraoDoModelo(modelo: string) {
+  return `${"_".repeat(20)}${modelo}${"_".repeat(22)}`;
+}
+
+/**
+ * Eventos de uma família.
+ *
+ * O evento não tem chave própria: ele carrega a da nota a que se refere. É por
+ * ela que se sabe se um cancelamento é de NF-e ou de NFC-e — as duas famílias
+ * compartilham serviço, schema e tipo de evento, e só o modelo as separa.
+ */
+export function filtrarEventosDaFamilia<T extends Filtravel<T>>(query: T, familia: string): T {
+  const f = familiaPorChave(familia);
+  const eventos = query.eq("completude", "evento");
+
+  return f.modelo
+    ? eventos.like("chave_acesso", padraoDoModelo(f.modelo))
+    : eventos.eq("tipo_documento", `Evento${familia}`);
 }
 
 export function filtrarPorDirecao<T extends Filtravel<T>>(
