@@ -70,8 +70,7 @@ const lote = await parseRetDistDFeInt(
   envelope(
     docZip(XML_CTE, "000000000000328", "procCTe_v4.00.xsd") +
       docZip(XML_EVENTO, "000000000000340", "procEventoCTe_v4.00.xsd")
-  ),
-  "cte"
+  )
 );
 
 conferir("cStat", lote.cStat, "138");
@@ -113,8 +112,7 @@ conferir("motivo sem placeholder", cte?.status_documento, "Autorizado o uso do C
 
 console.log("\nCT-e com o cliente como tomador");
 const comTomador = await parseRetDistDFeInt(
-  envelope(docZip(XML_CTE_TOMADOR, "000000000000329", "procCTe_v4.00.xsd")),
-  "cte"
+  envelope(docZip(XML_CTE_TOMADOR, "000000000000329", "procCTe_v4.00.xsd"))
 );
 const cteTomador = await normalizarDocumentoCTe(comTomador.documentos[0], {
   cnpjCliente: CNPJ_CLIENTE,

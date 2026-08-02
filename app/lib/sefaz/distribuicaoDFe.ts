@@ -7,33 +7,39 @@ export type SefazEnvironment = "producao" | "homologacao";
 
 /**
  * A SEFAZ tem um serviço de distribuição por família de documento: o da NF-e
- * atende os modelos 55/65, e o do CT-e (NT 2015.002) os modelos 57/67. São o
- * mesmo protocolo — distDFeInt, docZip em base64+gzip — com endpoint,
- * namespace, ação SOAP e versão de schema próprios.
- *
- * Cada serviço aceita dois critérios: a fila por NSU, que varre tudo que a
- * origem tem para o CNPJ, e a consulta de uma chave de acesso avulsa.
+ * atende os modelos 55/65, o do CT-e (NT 2015.002) os modelos 57/67 e o da
+ * MDF-e o modelo 58. São o mesmo protocolo — distDFeInt, docZip em base64+gzip
+ * — com endpoint, namespace, ação SOAP e versão de schema próprios.
  *
  * Verificado contra o ambiente real: a distribuição da NF-e nunca devolveu um
  * CT-e, e o serviço do CT-e só aceita a versão 1.00 do distDFeInt. A fila da
  * NF-e também nunca devolveu modelo 65 — a NFC-e é autorizada na SEFAZ
  * estadual e não entra na fila nacional, e por isso só se chega a ela pela
  * consulta por chave.
+ *
+ * O da MDF-e é o mais diferente dos três, e as diferenças estão no schema
+ * publicado pela SVRS (distDFeInt_v1.00.xsd do pacote PRMDF): o pedido não tem
+ * cUFAutor, e não existe consulta por chave — só a fila por NSU. Também é o
+ * único hospedado na SVRS em vez do ambiente nacional da Receita, e, como todo
+ * serviço da SVRS, espera o cabeçalho SOAP com a UF e a versão dos dados.
  */
-export type ServicoDistribuicao = "nfe" | "cte";
+export type ServicoDistribuicao = "nfe" | "cte" | "mdfe";
 
 interface DefinicaoServico {
   endpoints: Record<SefazEnvironment, string>;
   action: string;
   namespace: string;
   wsdlNamespace: string;
-  elemento: string;
+  /** Elemento que embrulha o dadosMsg. Nulo quando o corpo começa nele mesmo. */
+  elemento: string | null;
   dadosMsg: string;
-  resposta: string;
-  resultado: string;
+  /** Cabeçalho SOAP com cUF e versaoDados, exigido pelos serviços da SVRS. */
+  cabecalho: string | null;
   versao: string;
+  /** O pedido leva a UF de quem consulta. A MDF-e não tem esse campo. */
+  cUFAutor: boolean;
   /** Elemento da consulta por chave, e a tag da chave dentro dele. */
-  consultaChave: { elemento: string; chave: string };
+  consultaChave: { elemento: string; chave: string } | null;
 }
 
 const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
@@ -49,9 +55,9 @@ const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
     wsdlNamespace: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe",
     elemento: "nfeDistDFeInteresse",
     dadosMsg: "nfeDadosMsg",
-    resposta: "nfeDistDFeInteresseResponse",
-    resultado: "nfeDistDFeInteresseResult",
+    cabecalho: null,
     versao: "1.01",
+    cUFAutor: true,
     consultaChave: { elemento: "consChNFe", chave: "chNFe" },
   },
   cte: {
@@ -64,10 +70,30 @@ const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
     wsdlNamespace: "http://www.portalfiscal.inf.br/cte/wsdl/CTeDistribuicaoDFe",
     elemento: "cteDistDFeInteresse",
     dadosMsg: "cteDadosMsg",
-    resposta: "cteDistDFeInteresseResponse",
-    resultado: "cteDistDFeInteresseResult",
+    cabecalho: null,
     versao: "1.00",
+    cUFAutor: true,
     consultaChave: { elemento: "consChCTe", chave: "chCTe" },
+  },
+  // A MDF-e é autorizada pela SVRS para todas as UFs, e é lá que fica a
+  // distribuição dela — não no ambiente nacional da Receita, como as outras.
+  mdfe: {
+    endpoints: {
+      producao: "https://mdfe.svrs.rs.gov.br/ws/MDFeDistribuicaoDFe/MDFeDistribuicaoDFe.asmx",
+      homologacao:
+        "https://mdfe-homologacao.svrs.rs.gov.br/ws/MDFeDistribuicaoDFe/MDFeDistribuicaoDFe.asmx",
+    },
+    action: "http://www.portalfiscal.inf.br/mdfe/wsdl/MDFeDistribuicaoDFe/mdfeDistDFeInteresse",
+    namespace: "http://www.portalfiscal.inf.br/mdfe",
+    wsdlNamespace: "http://www.portalfiscal.inf.br/mdfe/wsdl/MDFeDistribuicaoDFe",
+    // O corpo do serviço da SVRS começa no próprio dadosMsg: não há elemento de
+    // operação embrulhando, como têm a NF-e e o CT-e.
+    elemento: null,
+    dadosMsg: "mdfeDadosMsg",
+    cabecalho: "mdfeCabecMsg",
+    versao: "1.00",
+    cUFAutor: false,
+    consultaChave: null,
   },
 };
 
@@ -123,30 +149,58 @@ function montarEnvelope(params: {
   const { servico, criterio } = params;
   const tpAmb = params.ambiente === "producao" ? "1" : "2";
 
-  const busca =
-    criterio.tipo === "fila"
-      ? `<distNSU><ultNSU>${criterio.ultNSU.padStart(15, "0")}</ultNSU></distNSU>`
-      : `<${servico.consultaChave.elemento}>` +
-        `<${servico.consultaChave.chave}>${criterio.chave}</${servico.consultaChave.chave}>` +
-        `</${servico.consultaChave.elemento}>`;
+  let busca: string;
 
-  // O distDFeInt vai como conteúdo literal dentro do elemento de dados.
+  if (criterio.tipo === "fila") {
+    busca = `<distNSU><ultNSU>${criterio.ultNSU.padStart(15, "0")}</ultNSU></distNSU>`;
+  } else {
+    const porChave = servico.consultaChave;
+
+    // A MDF-e só tem fila por NSU. Pedir uma chave aqui é erro de programação,
+    // não recusa da SEFAZ: o pedido nem chega a sair.
+    if (!porChave) {
+      throw new Error(
+        "Este servico de distribuicao so aceita a fila por NSU; nao ha consulta por chave."
+      );
+    }
+
+    busca =
+      `<${porChave.elemento}>` +
+      `<${porChave.chave}>${criterio.chave}</${porChave.chave}>` +
+      `</${porChave.elemento}>`;
+  }
+
+  // O distDFeInt vai como conteúdo literal dentro do elemento de dados. A ordem
+  // dos campos é a do schema, e a SEFAZ rejeita fora dela.
   const distDFeInt =
     `<distDFeInt xmlns="${servico.namespace}" versao="${servico.versao}">` +
     `<tpAmb>${tpAmb}</tpAmb>` +
-    `<cUFAutor>${params.cUFAutor}</cUFAutor>` +
+    (servico.cUFAutor ? `<cUFAutor>${params.cUFAutor}</cUFAutor>` : "") +
     `<CNPJ>${params.cnpj}</CNPJ>` +
     busca +
     `</distDFeInt>`;
 
+  // Sem elemento de operação, é o dadosMsg que declara o namespace do serviço.
+  const corpo = servico.elemento
+    ? `<${servico.elemento} xmlns="${servico.wsdlNamespace}">` +
+      `<${servico.dadosMsg}>${distDFeInt}</${servico.dadosMsg}>` +
+      `</${servico.elemento}>`
+    : `<${servico.dadosMsg} xmlns="${servico.wsdlNamespace}">${distDFeInt}</${servico.dadosMsg}>`;
+
+  const cabecalho = servico.cabecalho
+    ? `<soap12:Header>` +
+      `<${servico.cabecalho} xmlns="${servico.wsdlNamespace}">` +
+      `<cUF>${params.cUFAutor}</cUF>` +
+      `<versaoDados>${servico.versao}</versaoDados>` +
+      `</${servico.cabecalho}>` +
+      `</soap12:Header>`
+    : "";
+
   return (
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">` +
-    `<soap12:Body>` +
-    `<${servico.elemento} xmlns="${servico.wsdlNamespace}">` +
-    `<${servico.dadosMsg}>${distDFeInt}</${servico.dadosMsg}>` +
-    `</${servico.elemento}>` +
-    `</soap12:Body>` +
+    cabecalho +
+    `<soap12:Body>${corpo}</soap12:Body>` +
     `</soap12:Envelope>`
   );
 }
@@ -208,24 +262,43 @@ function stripPrefix(name: string) {
 }
 
 /**
+ * Procura o retDistDFeInt onde quer que ele esteja no envelope.
+ *
+ * Cada serviço embrulha o retorno com nomes próprios — nfeDistDFeInteresseResult,
+ * cteDistDFeInteresseResult, mdfeDistDFeInteresseResult —, e o da MDF-e fica na
+ * SVRS, que só serve o WSDL a quem apresenta certificado. Procurar pelo conteúdo
+ * é o que dispensa acertar de antemão um envelope que não dá para conferir.
+ */
+function acharRetorno(no: unknown): Record<string, unknown> | null {
+  if (!no || typeof no !== "object") return null;
+
+  const registro = no as Record<string, unknown>;
+  const ret = registro.retDistDFeInt;
+  if (ret && typeof ret === "object") return ret as Record<string, unknown>;
+
+  for (const valor of Object.values(registro)) {
+    const achado = acharRetorno(valor);
+    if (achado) return achado;
+  }
+
+  return null;
+}
+
+/**
  * Interpreta o envelope SOAP devolvido pela SEFAZ.
  *
  * Separado de buscarLoteDFe para poder ser exercitado sem rede nem certificado.
  */
 export async function parseRetDistDFeInt(
-  respostaXml: string,
-  servico: ServicoDistribuicao = "nfe"
+  respostaXml: string
 ): Promise<ResultadoDistribuicao> {
-  const definicao = SERVICOS[servico];
-
   const parsed = await parseStringPromise(respostaXml, {
     explicitArray: false,
     tagNameProcessors: [stripPrefix],
     ignoreAttrs: false,
   });
 
-  const ret =
-    parsed?.Envelope?.Body?.[definicao.resposta]?.[definicao.resultado]?.retDistDFeInt;
+  const ret = acharRetorno(parsed?.Envelope?.Body ?? parsed);
 
   if (!ret) {
     throw new Error(
@@ -234,7 +307,7 @@ export async function parseRetDistDFeInt(
   }
 
   const documentos: DocumentoDistribuido[] = [];
-  const lote = ret.loteDistDFeInt?.docZip;
+  const lote = (ret.loteDistDFeInt as { docZip?: unknown } | undefined)?.docZip;
 
   if (lote) {
     // Com um único documento o xml2js devolve objeto, não array.
@@ -354,5 +427,5 @@ async function chamarDistribuicao(params: {
     params.timeoutMs ?? 60_000
   );
 
-  return parseRetDistDFeInt(respostaXml, servico);
+  return parseRetDistDFeInt(respostaXml);
 }

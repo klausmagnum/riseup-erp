@@ -134,6 +134,17 @@ Deve terminar com `Banco completo`. Se listar alguma coluna faltando, é porque
 uma das migrations não foi aplicada — repita o passo acima com o arquivo
 correspondente.
 
+### Pendente: a captura de MDF-e
+
+A MDF-e entrou depois desta etapa e precisa das colunas de fila dela. Cole no
+mesmo editor SQL, do mesmo jeito:
+
+3. `supabase/migrations/20260802150000_preparar_captura_mdfe.sql`
+
+Enquanto ela não for aplicada, o cron da MDF-e responde
+`column clientes.sincronizacao_mdfe_ativa does not exist` e nenhum manifesto é
+capturado — os outros três fluxos seguem funcionando normalmente.
+
 > **Por que duas migrations e não uma:** a primeira já existia no repositório
 > desde julho, mas nunca tinha sido aplicada no banco — o nome do arquivo estava
 > fora do padrão dos demais e ela passou despercebida. Sem as colunas dela a
@@ -206,6 +217,10 @@ npx tsx scripts/verificar-cte.mts
 npx tsx scripts/verificar-nfce.mts
 ```
 
+```bash
+npx tsx scripts/verificar-mdfe.mts
+```
+
 Para testar de ponta a ponta é preciso um certificado A1 cadastrado. Aí sim:
 
 1. Suba o RiseUP local (`npm run dev`)
@@ -238,8 +253,18 @@ clicando em Sincronizar manualmente.
 
 ## Depois que estiver rodando
 
-O cron já está configurado em `vercel.json` para rodar às **8h, 12h, 16h e
-20h**. Ele começa a funcionar assim que o deploy com as variáveis subir.
+Os crons já estão configurados em `vercel.json`, um por família, em horários
+escalonados — os fluxos usam o mesmo certificado do cliente, e as origens
+recusam consultas em sequência:
+
+| Família | Horários |
+|---|---|
+| NF-e | 8h, 12h, 16h, 20h |
+| NFS-e | 9h30, 13h30, 17h30, 21h30 |
+| MDF-e | 10h30, 14h30, 18h30, 22h30 |
+| CT-e | 11h, 15h, 19h, 23h |
+
+Eles começam a funcionar assim que o deploy com as variáveis subir.
 
 Para acompanhar: **Documentos Fiscais → Sincronizações** mostra cada execução,
 quantos documentos vieram e o que deu errado.

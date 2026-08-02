@@ -75,6 +75,16 @@ function servicoDoModelo(modelo: string): ServicoDistribuicao {
 }
 
 /**
+ * A MDF-e é o único documento sem consulta por chave.
+ *
+ * O schema do pedido de distribuição dela (distDFeInt_v1.00.xsd, pacote PRMDF
+ * da SVRS) só aceita a fila por NSU. Sem esta guarda, o modelo 58 cairia no
+ * serviço da NF-e, que responderia que não achou a chave — e quem digitou
+ * concluiria que o manifesto não existe.
+ */
+const MODELO_MDFE = "58";
+
+/**
  * Busca uma chave e grava o que a SEFAZ devolver.
  *
  * Nunca lança por recusa da SEFAZ: "chave não é de interesse do CNPJ" e
@@ -107,6 +117,16 @@ export async function capturarChave(params: {
   }
 
   const { modelo } = destrincharChave(chave);
+
+  if (modelo === MODELO_MDFE) {
+    return {
+      ...base,
+      mensagem:
+        "MDF-e nao tem consulta por chave: a distribuicao dela so entrega pela fila de NSU, " +
+        "que a sincronizacao automatica ja percorre.",
+    };
+  }
+
   const servico = servicoDoModelo(modelo);
 
   const resultado = await consultarChaveDFe({
