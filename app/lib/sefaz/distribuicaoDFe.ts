@@ -5,15 +5,61 @@ import { getUfCode } from "./ufCodes";
 
 export type SefazEnvironment = "producao" | "homologacao";
 
-// Serviço de distribuição de DF-e. É este — e não o NfeConsultacao4 — que
-// entrega as notas EMITIDAS CONTRA o CNPJ do cliente.
-const ENDPOINTS: Record<SefazEnvironment, string> = {
-  producao: "https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx",
-  homologacao: "https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx",
-};
+/**
+ * A SEFAZ tem um serviço de distribuição por família de documento: o da NF-e
+ * entrega apenas modelos 55/65, e o do CT-e (NT 2015.002) apenas 57/67. São o
+ * mesmo protocolo — distDFeInt paginado por NSU, docZip em base64+gzip — com
+ * endpoint, namespace, ação SOAP e versão de schema próprios.
+ *
+ * Verificado contra o ambiente real: a distribuição da NF-e nunca devolveu um
+ * CT-e, e o serviço do CT-e só aceita a versão 1.00 do distDFeInt.
+ */
+export type ServicoDistribuicao = "nfe" | "cte";
 
-const SOAP_ACTION =
-  "http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse";
+interface DefinicaoServico {
+  endpoints: Record<SefazEnvironment, string>;
+  action: string;
+  namespace: string;
+  wsdlNamespace: string;
+  elemento: string;
+  dadosMsg: string;
+  resposta: string;
+  resultado: string;
+  versao: string;
+}
+
+const SERVICOS: Record<ServicoDistribuicao, DefinicaoServico> = {
+  // É este — e não o NfeConsultacao4 — que entrega as notas EMITIDAS CONTRA o
+  // CNPJ do cliente.
+  nfe: {
+    endpoints: {
+      producao: "https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx",
+      homologacao: "https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx",
+    },
+    action: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse",
+    namespace: "http://www.portalfiscal.inf.br/nfe",
+    wsdlNamespace: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe",
+    elemento: "nfeDistDFeInteresse",
+    dadosMsg: "nfeDadosMsg",
+    resposta: "nfeDistDFeInteresseResponse",
+    resultado: "nfeDistDFeInteresseResult",
+    versao: "1.01",
+  },
+  cte: {
+    endpoints: {
+      producao: "https://www1.cte.fazenda.gov.br/CTeDistribuicaoDFe/CTeDistribuicaoDFe.asmx",
+      homologacao: "https://hom1.cte.fazenda.gov.br/CTeDistribuicaoDFe/CTeDistribuicaoDFe.asmx",
+    },
+    action: "http://www.portalfiscal.inf.br/cte/wsdl/CTeDistribuicaoDFe/cteDistDFeInteresse",
+    namespace: "http://www.portalfiscal.inf.br/cte",
+    wsdlNamespace: "http://www.portalfiscal.inf.br/cte/wsdl/CTeDistribuicaoDFe",
+    elemento: "cteDistDFeInteresse",
+    dadosMsg: "cteDadosMsg",
+    resposta: "cteDistDFeInteresseResponse",
+    resultado: "cteDistDFeInteresseResult",
+    versao: "1.00",
+  },
+};
 
 // A SEFAZ devolve no máximo 50 documentos por chamada, independente do que se peça.
 export const DOCS_POR_LOTE = 50;
@@ -50,17 +96,19 @@ export interface CertificadoA1 {
 }
 
 function montarEnvelope(params: {
+  servico: DefinicaoServico;
   ambiente: SefazEnvironment;
   cnpj: string;
   cUFAutor: number;
   ultNSU: string;
 }) {
+  const { servico } = params;
   const tpAmb = params.ambiente === "producao" ? "1" : "2";
   const ultNSU = params.ultNSU.padStart(15, "0");
 
-  // O distDFeInt vai como conteúdo literal dentro de nfeDadosMsg.
+  // O distDFeInt vai como conteúdo literal dentro do elemento de dados.
   const distDFeInt =
-    `<distDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">` +
+    `<distDFeInt xmlns="${servico.namespace}" versao="${servico.versao}">` +
     `<tpAmb>${tpAmb}</tpAmb>` +
     `<cUFAutor>${params.cUFAutor}</cUFAutor>` +
     `<CNPJ>${params.cnpj}</CNPJ>` +
@@ -71,9 +119,9 @@ function montarEnvelope(params: {
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">` +
     `<soap12:Body>` +
-    `<nfeDistDFeInteresse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">` +
-    `<nfeDadosMsg>${distDFeInt}</nfeDadosMsg>` +
-    `</nfeDistDFeInteresse>` +
+    `<${servico.elemento} xmlns="${servico.wsdlNamespace}">` +
+    `<${servico.dadosMsg}>${distDFeInt}</${servico.dadosMsg}>` +
+    `</${servico.elemento}>` +
     `</soap12:Body>` +
     `</soap12:Envelope>`
   );
@@ -81,6 +129,7 @@ function montarEnvelope(params: {
 
 function postSoap(
   endpoint: string,
+  action: string,
   envelope: string,
   certificado: CertificadoA1,
   timeoutMs: number
@@ -101,7 +150,7 @@ function postSoap(
         passphrase: certificado.senha,
         minVersion: "TLSv1.2",
         headers: {
-          "Content-Type": `application/soap+xml; charset=utf-8; action="${SOAP_ACTION}"`,
+          "Content-Type": `application/soap+xml; charset=utf-8; action="${action}"`,
           "Content-Length": payload.length,
         },
       },
@@ -140,8 +189,11 @@ function stripPrefix(name: string) {
  * Separado de buscarLoteDFe para poder ser exercitado sem rede nem certificado.
  */
 export async function parseRetDistDFeInt(
-  respostaXml: string
+  respostaXml: string,
+  servico: ServicoDistribuicao = "nfe"
 ): Promise<ResultadoDistribuicao> {
+  const definicao = SERVICOS[servico];
+
   const parsed = await parseStringPromise(respostaXml, {
     explicitArray: false,
     tagNameProcessors: [stripPrefix],
@@ -149,8 +201,7 @@ export async function parseRetDistDFeInt(
   });
 
   const ret =
-    parsed?.Envelope?.Body?.nfeDistDFeInteresseResponse?.nfeDistDFeInteresseResult
-      ?.retDistDFeInt;
+    parsed?.Envelope?.Body?.[definicao.resposta]?.[definicao.resultado]?.retDistDFeInt;
 
   if (!ret) {
     throw new Error(
@@ -202,8 +253,12 @@ export async function buscarLoteDFe(params: {
   certificado: CertificadoA1;
   ambiente?: SefazEnvironment;
   timeoutMs?: number;
+  /** Família do documento. Cada uma tem seu serviço; ver SERVICOS. */
+  servico?: ServicoDistribuicao;
 }): Promise<ResultadoDistribuicao> {
   const ambiente = params.ambiente ?? "producao";
+  const servico = params.servico ?? "nfe";
+  const definicao = SERVICOS[servico];
   const cnpj = params.cnpj.replace(/\D/g, "");
 
   if (cnpj.length !== 14) {
@@ -211,6 +266,7 @@ export async function buscarLoteDFe(params: {
   }
 
   const envelope = montarEnvelope({
+    servico: definicao,
     ambiente,
     cnpj,
     cUFAutor: getUfCode(params.uf),
@@ -218,11 +274,14 @@ export async function buscarLoteDFe(params: {
   });
 
   const respostaXml = await postSoap(
-    ENDPOINTS[ambiente],
+    definicao.endpoints[ambiente],
+    definicao.action,
     envelope,
     params.certificado,
-    params.timeoutMs ?? 30_000
+    // O serviço do CT-e respondeu 503 e timeout em tentativa recente; a folga
+    // maior evita transformar instabilidade momentânea em erro do cliente.
+    params.timeoutMs ?? 60_000
   );
 
-  return parseRetDistDFeInt(respostaXml);
+  return parseRetDistDFeInt(respostaXml, servico);
 }
