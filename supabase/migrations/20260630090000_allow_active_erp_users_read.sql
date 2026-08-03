@@ -23,7 +23,9 @@ begin
     'clientes',
     'setores',
     'usuarios_sistema',
-    'grupo_clientes',
+    -- A tabela chama grupos_clientes (plural). Escrito no singular, o
+    -- to_regclass abaixo devolvia null e a tabela era pulada em silencio.
+    'grupos_clientes',
     'cliente_obrigacoes'
   ]
   loop
