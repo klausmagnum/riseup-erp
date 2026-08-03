@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ConfirmDeleteModal from "@/app/components/ConfirmDeleteModal";
 import ErpChrome from "@/app/components/ErpChrome";
-import { supabase } from "@/app/lib/supabaseClient";
+import { requisitarApi } from "@/app/lib/apiClient";
 
 type Cliente = {
   id: string;
@@ -20,6 +20,11 @@ type Cliente = {
   email: string | null;
   contato: string | null;
   status: string | null;
+};
+
+type ClientesApiResponse = {
+  clientes?: Cliente[];
+  error?: string;
 };
 
 function ActionIcon({ type }: { type: "info" | "edit" | "delete" }) {
@@ -48,18 +53,15 @@ export default function ClientesPage() {
   useEffect(() => {
     async function loadClientes() {
       setIsLoading(true);
-      const { data, error } = await supabase
-        .from("clientes")
-        .select("id,razao_social,nome_fantasia,tipo,matriz_filial,identificacao,regime_tributario,grupo_clientes,municipio,estado,email,contato,status")
-        .order("razao_social", { ascending: true });
+      const { ok, result } = await requisitarApi<ClientesApiResponse>("/api/clientes");
 
-      if (error) {
-        setFeedback(`Erro ao buscar clientes: ${error.message}`);
+      if (!ok) {
+        setFeedback(result.error || "Erro ao buscar clientes.");
         setIsLoading(false);
         return;
       }
 
-      setClientes(data ?? []);
+      setClientes(result.clientes ?? []);
       setIsLoading(false);
     }
 
@@ -86,11 +88,13 @@ export default function ClientesPage() {
   async function excluirCliente(id: string) {
     setFeedback("");
     setIsDeleting(true);
-    const { error } = await supabase.from("clientes").delete().eq("id", id);
+    const { ok, result } = await requisitarApi<ClientesApiResponse>(`/api/clientes?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     setIsDeleting(false);
 
-    if (error) {
-      setFeedback(`Erro ao excluir cliente: ${error.message}`);
+    if (!ok) {
+      setFeedback(result.error || "Erro ao excluir cliente.");
       return;
     }
 

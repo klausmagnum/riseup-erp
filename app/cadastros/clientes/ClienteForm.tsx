@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ErpChrome from "@/app/components/ErpChrome";
+import { requisitarApi } from "@/app/lib/apiClient";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type GrupoCliente = {
@@ -56,6 +57,36 @@ type ClienteCertificado = {
 type ClienteFormProps = {
   mode?: "create" | "edit";
 };
+
+type GruposApiResponse = { grupos?: GrupoCliente[]; error?: string };
+type ObrigacoesApiResponse = { obrigacoes?: Obrigacao[]; error?: string };
+type ClienteRegistro = {
+  razao_social: string | null;
+  data_abertura: string | null;
+  nome_fantasia: string | null;
+  tipo: string | null;
+  matriz_filial: string | null;
+  identificacao: string | null;
+  inscricao_estadual: string | null;
+  inscricao_municipal: string | null;
+  cei: string | null;
+  cep: string | null;
+  logradouro: string | null;
+  regime_tributario: string | null;
+  numero: string | null;
+  complemento: string | null;
+  grupo_clientes: string | null;
+  bairro: string | null;
+  estado: string | null;
+  municipio: string | null;
+  email: string | null;
+  contato: string | null;
+  data_inicio_controle_obrigacoes: string | null;
+  observacao: string | null;
+  obrigacoes_vinculadas: string[] | null;
+};
+
+type ClienteApiResponse = { cliente?: ClienteRegistro; error?: string };
 
 const tipos = ["Juridica", "Fisica", "Outro"];
 const matrizFilialOptions = ["Matriz", "Filial"];
@@ -141,31 +172,6 @@ function regimesDaObrigacao(obrigacao: Obrigacao) {
     .filter((regime) => regime.length > 0 && regime !== "nao informado");
 }
 
-async function buscarObrigacoes(): Promise<{ obrigacoes: Obrigacao[]; error: string }> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session?.access_token) {
-    return { obrigacoes: [], error: "Sessao nao encontrada. Entre novamente no sistema." };
-  }
-
-  try {
-    const response = await fetch("/api/obrigacoes", {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-    const result = (await response.json().catch(() => ({}))) as { obrigacoes?: Obrigacao[]; error?: string };
-
-    if (!response.ok) {
-      return { obrigacoes: [], error: result.error || "Erro ao buscar obrigacoes." };
-    }
-
-    return { obrigacoes: result.obrigacoes ?? [], error: "" };
-  } catch {
-    return { obrigacoes: [], error: "Nao foi possivel carregar as obrigacoes." };
-  }
-}
-
 function ObrigacaoStatusIcon({ checked }: { checked: boolean }) {
   return (
     <svg
@@ -212,18 +218,19 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
   useEffect(() => {
     async function loadBaseData() {
       setIsLoadingObrigacoes(true);
-      const [{ data: gruposData }, obrigacoesResult] = await Promise.all([
-        supabase.from("grupos_clientes").select("id,nome").order("nome", { ascending: true }),
-        buscarObrigacoes(),
+      const [gruposResult, obrigacoesResult] = await Promise.all([
+        requisitarApi<GruposApiResponse>("/api/grupos-clientes"),
+        requisitarApi<ObrigacoesApiResponse>("/api/obrigacoes"),
       ]);
 
-      setGrupos(gruposData ?? []);
-      if (obrigacoesResult.error) {
-        setObrigacoesFeedback(obrigacoesResult.error);
+      setGrupos(gruposResult.ok ? gruposResult.result.grupos ?? [] : []);
+
+      if (!obrigacoesResult.ok) {
+        setObrigacoesFeedback(obrigacoesResult.result.error || "Erro ao buscar obrigacoes.");
         setObrigacoes([]);
       } else {
         setObrigacoesFeedback("");
-        setObrigacoes(obrigacoesResult.obrigacoes);
+        setObrigacoes(obrigacoesResult.result.obrigacoes ?? []);
       }
       setIsLoadingObrigacoes(false);
     }
@@ -242,14 +249,11 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
       }
 
       setIsLoadingCliente(true);
-      const { data, error } = await supabase
-        .from("clientes")
-        .select("razao_social,data_abertura,nome_fantasia,tipo,matriz_filial,identificacao,inscricao_estadual,inscricao_municipal,cei,cep,logradouro,regime_tributario,numero,complemento,grupo_clientes,bairro,estado,municipio,email,contato,data_inicio_controle_obrigacoes,observacao,obrigacoes_vinculadas")
-        .eq("id", editingId)
-        .single();
+      const { ok, result } = await requisitarApi<ClienteApiResponse>(`/api/clientes?id=${encodeURIComponent(editingId)}`);
+      const data = result.cliente;
 
-      if (error) {
-        setFeedback(`Erro ao buscar cliente: ${error.message}`);
+      if (!ok || !data) {
+        setFeedback(result.error || "Erro ao buscar cliente.");
         setIsLoadingCliente(false);
         return;
       }
@@ -278,7 +282,7 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
         dataInicioControleObrigacoes: data.data_inicio_controle_obrigacoes || "",
         observacao: data.observacao || "",
       });
-      setSelectedObrigacaoIds(new Set((data.obrigacoes_vinculadas as string[] | null) ?? []));
+      setSelectedObrigacaoIds(new Set(data.obrigacoes_vinculadas ?? []));
 
       setIsLoadingCliente(false);
     }
@@ -633,14 +637,20 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
       status: "Ativo",
     };
 
-    const savedCliente =
+    const salvo =
       mode === "edit" && editingId
-        ? await supabase.from("clientes").update(payload).eq("id", editingId).select("id").single()
-        : await supabase.from("clientes").insert(payload).select("id").single();
+        ? await requisitarApi<ClienteApiResponse>("/api/clientes", {
+            method: "PATCH",
+            body: JSON.stringify({ id: editingId, payload }),
+          })
+        : await requisitarApi<ClienteApiResponse>("/api/clientes", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
 
-    if (savedCliente.error) {
+    if (!salvo.ok) {
       setIsSaving(false);
-      setFeedback(`Erro ao ${mode === "edit" ? "atualizar" : "salvar"} cliente: ${savedCliente.error.message}`);
+      setFeedback(salvo.result.error || `Erro ao ${mode === "edit" ? "atualizar" : "salvar"} cliente.`);
       return;
     }
 

@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfirmDeleteModal from "@/app/components/ConfirmDeleteModal";
 import ErpChrome from "@/app/components/ErpChrome";
-import { supabase } from "@/app/lib/supabaseClient";
+import { requisitarApi } from "@/app/lib/apiClient";
 
 type GrupoCliente = {
   id: string;
@@ -22,22 +22,8 @@ type Cliente = {
   grupo_clientes: string | null;
 };
 
-const defaultGrupos = [
-  {
-    nome: "Clientes recorrentes",
-    responsavel: "Equipe Atendimento",
-    clientes: 0,
-    status: "Ativo",
-    descricao: "Clientes com rotinas mensais e acompanhamento permanente.",
-  },
-  {
-    nome: "Projetos pontuais",
-    responsavel: "Equipe Comercial",
-    clientes: 0,
-    status: "Ativo",
-    descricao: "Clientes vinculados a demandas avulsas, implantacoes ou consultorias.",
-  },
-];
+type GruposApiResponse = { grupos?: GrupoCliente[]; grupo?: GrupoCliente; error?: string };
+type ClientesApiResponse = { clientes?: Cliente[]; error?: string };
 
 const emptyForm = {
   nome: "",
@@ -73,48 +59,26 @@ export default function GrupoClientesPage() {
   useEffect(() => {
     async function loadGrupos() {
       setIsLoading(true);
-      const { data: clientesData, error: clientesError } = await supabase
-        .from("clientes")
-        .select("id,razao_social,nome_fantasia,identificacao,grupo_clientes")
-        .order("razao_social", { ascending: true });
+      const [clientesResult, gruposResult] = await Promise.all([
+        requisitarApi<ClientesApiResponse>("/api/clientes"),
+        requisitarApi<GruposApiResponse>("/api/grupos-clientes"),
+      ]);
 
-      if (clientesError) {
-        setFeedback(`Erro ao buscar clientes: ${clientesError.message}`);
+      if (!clientesResult.ok) {
+        setFeedback(clientesResult.result.error || "Erro ao buscar clientes.");
         setIsLoading(false);
         return;
       }
 
-      setClientes(clientesData ?? []);
+      setClientes(clientesResult.result.clientes ?? []);
 
-      const { data, error } = await supabase
-        .from("grupos_clientes")
-        .select("id,nome,responsavel,descricao,clientes,status")
-        .order("created_at", { ascending: true });
-
-      if (error) {
-        setFeedback(`Erro ao buscar grupos de clientes: ${error.message}`);
+      if (!gruposResult.ok) {
+        setFeedback(gruposResult.result.error || "Erro ao buscar grupos de clientes.");
         setIsLoading(false);
         return;
       }
 
-      if (data && data.length > 0) {
-        setGrupos(data);
-        setIsLoading(false);
-        return;
-      }
-
-      const { data: seededGrupos, error: seedError } = await supabase
-        .from("grupos_clientes")
-        .insert(defaultGrupos)
-        .select("id,nome,responsavel,descricao,clientes,status");
-
-      if (seedError) {
-        setFeedback(`Erro ao criar grupos iniciais: ${seedError.message}`);
-        setIsLoading(false);
-        return;
-      }
-
-      setGrupos(seededGrupos ?? []);
+      setGrupos(gruposResult.result.grupos ?? []);
       setIsLoading(false);
     }
 
@@ -139,29 +103,9 @@ export default function GrupoClientesPage() {
     );
   }, [clientesPorGrupo, grupos, search]);
 
-  async function atualizarVinculosClientes(groupName: string, previousGroupName: string | null) {
-    if (previousGroupName) {
-      const { error: clearError } = await supabase
-        .from("clientes")
-        .update({ grupo_clientes: null })
-        .eq("grupo_clientes", previousGroupName);
-
-      if (clearError) {
-        throw new Error(`Erro ao limpar empresas vinculadas: ${clearError.message}`);
-      }
-    }
-
-    if (selectedClienteIds.length > 0) {
-      const { error: linkError } = await supabase
-        .from("clientes")
-        .update({ grupo_clientes: groupName })
-        .in("id", selectedClienteIds);
-
-      if (linkError) {
-        throw new Error(`Erro ao vincular empresas: ${linkError.message}`);
-      }
-    }
-
+  // O revinculo em si roda no servidor, junto com a gravacao do grupo. Aqui so
+  // refletimos o resultado na lista que ja esta na tela.
+  function refletirVinculosClientes(groupName: string, previousGroupName: string | null) {
     setClientes((current) =>
       current.map((cliente) => {
         if (previousGroupName && cliente.grupo_clientes === previousGroupName) {
@@ -196,25 +140,19 @@ export default function GrupoClientesPage() {
     };
 
     if (editingId) {
-      const { data, error } = await supabase
-        .from("grupos_clientes")
-        .update(payload)
-        .eq("id", editingId)
-        .select("id,nome,responsavel,descricao,clientes,status")
-        .single();
+      const { ok, result } = await requisitarApi<GruposApiResponse>("/api/grupos-clientes", {
+        method: "PATCH",
+        body: JSON.stringify({ id: editingId, payload, clienteIds: selectedClienteIds, nomeAnterior: editingOriginalName }),
+      });
 
-      if (error) {
-        setFeedback(`Erro ao atualizar grupo: ${error.message}`);
+      if (!ok) {
+        setFeedback(result.error || "Erro ao atualizar grupo.");
         return;
       }
 
-      try {
-        await atualizarVinculosClientes(nome, editingOriginalName);
-      } catch (error) {
-        setFeedback(error instanceof Error ? error.message : "Erro ao vincular empresas ao grupo.");
-        return;
-      }
+      refletirVinculosClientes(nome, editingOriginalName);
 
+      const data = result.grupo;
       setGrupos((current) => current.map((grupo) => (grupo.id === editingId && data ? data : grupo)));
       setEditingId(null);
       setEditingOriginalName(null);
@@ -224,26 +162,20 @@ export default function GrupoClientesPage() {
       return;
     }
 
-    const { data, error } = await supabase
-      .from("grupos_clientes")
-      .insert({ ...payload, status: "Ativo" })
-      .select("id,nome,responsavel,descricao,clientes,status")
-      .single();
+    const { ok, result } = await requisitarApi<GruposApiResponse>("/api/grupos-clientes", {
+      method: "POST",
+      body: JSON.stringify({ payload, clienteIds: selectedClienteIds }),
+    });
 
-    if (error) {
-      setFeedback(`Erro ao salvar grupo: ${error.message}`);
+    if (!ok) {
+      setFeedback(result.error || "Erro ao salvar grupo.");
       return;
     }
 
-    try {
-      await atualizarVinculosClientes(nome, null);
-    } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Erro ao vincular empresas ao grupo.");
-      return;
-    }
+    refletirVinculosClientes(nome, null);
 
-    if (data) {
-      setGrupos((current) => [...current, data]);
+    if (result.grupo) {
+      setGrupos((current) => [...current, result.grupo as GrupoCliente]);
     }
     setSelectedClienteIds([]);
     setForm(emptyForm);
@@ -263,23 +195,14 @@ export default function GrupoClientesPage() {
   async function excluirGrupo(grupo: GrupoCliente) {
     setFeedback("");
     setIsDeleting(true);
-    const { error: clearError } = await supabase
-      .from("clientes")
-      .update({ grupo_clientes: null })
-      .eq("grupo_clientes", grupo.nome);
+    const { ok, result } = await requisitarApi<GruposApiResponse>(
+      `/api/grupos-clientes?id=${encodeURIComponent(grupo.id)}&nome=${encodeURIComponent(grupo.nome)}`,
+      { method: "DELETE" }
+    );
     setIsDeleting(false);
 
-    if (clearError) {
-      setFeedback(`Erro ao limpar empresas vinculadas: ${clearError.message}`);
-      return;
-    }
-
-    setIsDeleting(true);
-    const { error } = await supabase.from("grupos_clientes").delete().eq("id", grupo.id);
-    setIsDeleting(false);
-
-    if (error) {
-      setFeedback(`Erro ao excluir grupo: ${error.message}`);
+    if (!ok) {
+      setFeedback(result.error || "Erro ao excluir grupo.");
       return;
     }
 
