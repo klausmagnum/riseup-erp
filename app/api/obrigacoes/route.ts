@@ -98,7 +98,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await auth.adminClient
     .from("obrigacoes")
-    .select("id,nome,validacao,regime,periodicidade,prazo,setor,status")
+    .select("id,nome,validacao,regime,regimes,periodicidade,prazo,setor,status")
     .order("nome", { ascending: true });
 
   if (error) {

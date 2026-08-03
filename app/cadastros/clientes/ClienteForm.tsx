@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ErpChrome from "@/app/components/ErpChrome";
 import { supabase } from "@/app/lib/supabaseClient";
@@ -15,6 +15,7 @@ type Obrigacao = {
   id: string;
   nome: string;
   regime: string | null;
+  regimes: string[] | null;
   periodicidade: string | null;
   setor: string | null;
   status: string | null;
@@ -123,6 +124,48 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{children}</span>;
 }
 
+function normalizarRegime(valor: string) {
+  return valor
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
+function regimesDaObrigacao(obrigacao: Obrigacao) {
+  const doArray = Array.isArray(obrigacao.regimes) ? obrigacao.regimes : [];
+  const doTexto = (obrigacao.regime || "").split(",");
+
+  return [...doArray, ...doTexto]
+    .map((regime) => normalizarRegime(regime))
+    .filter((regime) => regime.length > 0 && regime !== "nao informado");
+}
+
+async function buscarObrigacoes(): Promise<{ obrigacoes: Obrigacao[]; error: string }> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    return { obrigacoes: [], error: "Sessao nao encontrada. Entre novamente no sistema." };
+  }
+
+  try {
+    const response = await fetch("/api/obrigacoes", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    const result = (await response.json().catch(() => ({}))) as { obrigacoes?: Obrigacao[]; error?: string };
+
+    if (!response.ok) {
+      return { obrigacoes: [], error: result.error || "Erro ao buscar obrigacoes." };
+    }
+
+    return { obrigacoes: result.obrigacoes ?? [], error: "" };
+  } catch {
+    return { obrigacoes: [], error: "Nao foi possivel carregar as obrigacoes." };
+  }
+}
+
 function ObrigacaoStatusIcon({ checked }: { checked: boolean }) {
   return (
     <svg
@@ -156,6 +199,7 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
   const [showCertificadoForm, setShowCertificadoForm] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [anexosFeedback, setAnexosFeedback] = useState("");
+  const [obrigacoesFeedback, setObrigacoesFeedback] = useState("");
   const [certificadosFeedback, setCertificadosFeedback] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingAnexo, setIsUploadingAnexo] = useState(false);
@@ -163,26 +207,23 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
   const [isLoadingCliente, setIsLoadingCliente] = useState(mode === "edit");
   const [isLoadingObrigacoes, setIsLoadingObrigacoes] = useState(true);
   const [isLoadingAnexos, setIsLoadingAnexos] = useState(mode === "edit");
-  const [todasAsObrigacoes, setTodasAsObrigacoes] = useState<Obrigacao[]>([]);
   const [isLoadingCertificados, setIsLoadingCertificados] = useState(mode === "edit");
 
   useEffect(() => {
     async function loadBaseData() {
       setIsLoadingObrigacoes(true);
-      const [{ data: gruposData }, { data: obrigacoesData, error: obrigacoesError }] = await Promise.all([
+      const [{ data: gruposData }, obrigacoesResult] = await Promise.all([
         supabase.from("grupos_clientes").select("id,nome").order("nome", { ascending: true }),
-        supabase
-          .from("obrigacoes")
-          .select("id,nome,regime,periodicidade,setor,status")
-          .order("nome", { ascending: true }),
+        buscarObrigacoes(),
       ]);
 
       setGrupos(gruposData ?? []);
-      if (obrigacoesError) {
-        setFeedback(`Erro ao buscar obrigacoes: ${obrigacoesError.message}`);
+      if (obrigacoesResult.error) {
+        setObrigacoesFeedback(obrigacoesResult.error);
+        setObrigacoes([]);
       } else {
-        setObrigacoes(obrigacoesData ?? []);
-        setTodasAsObrigacoes(obrigacoesData ?? []);
+        setObrigacoesFeedback("");
+        setObrigacoes(obrigacoesResult.obrigacoes);
       }
       setIsLoadingObrigacoes(false);
     }
@@ -245,15 +286,18 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
     loadCliente();
   }, [editingId, mode]);
 
-  useEffect(() => {
-    if (todasAsObrigacoes.length === 0) return;
+  const obrigacoesDoRegime = useMemo(() => {
+    const regimeCliente = normalizarRegime(form.regimeTributario);
 
-    const filteredObrigacoes = todasAsObrigacoes.filter(
-      (obrigacao) => obrigacao.regime === form.regimeTributario
-    );
+    return obrigacoes.filter((obrigacao) => {
+      if (selectedObrigacaoIds.has(obrigacao.id)) return true;
 
-    setObrigacoes(filteredObrigacoes);
-  }, [form.regimeTributario, todasAsObrigacoes]);
+      const regimesAplicaveis = regimesDaObrigacao(obrigacao);
+      if (regimesAplicaveis.length === 0) return true;
+
+      return regimesAplicaveis.includes(regimeCliente);
+    });
+  }, [form.regimeTributario, obrigacoes, selectedObrigacaoIds]);
 
   function updateField(field: keyof typeof emptyForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -782,33 +826,22 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
               <div>
                 <h2 className="text-sm font-black text-slate-100">Obrigacoes</h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  Marque com check verde as obrigacoes que devem ficar vinculadas a este cliente.
+                  Marque com check verde as obrigacoes que devem ficar vinculadas a este cliente. A lista mostra as
+                  obrigacoes do regime <strong className="text-slate-300">{form.regimeTributario}</strong>.
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  className="min-h-8 rounded-lg border border-sky-300/30 bg-sky-300/10 px-3 text-xs font-bold text-sky-200 transition hover:bg-sky-300/20"
-                  onClick={async () => {
-                    setIsLoadingObrigacoes(true);
-                    const { data: obrigacoesData, error } = await supabase
-                      .from("obrigacoes")
-                      .select("id,nome,regime,periodicidade,setor,status")
-                      .order("nome", { ascending: true });
-                    console.log("Recarregar clicado - Obrigações:", obrigacoesData);
-                    console.log("Erro (se houver):", error);
-                    setObrigacoes(obrigacoesData ?? []);
-                    setTodasAsObrigacoes(obrigacoesData ?? []);
-                    setIsLoadingObrigacoes(false);
-                  }}
-                  type="button"
-                >
-                  ↻ Recarregar
-                </button>
                 <span className="rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 text-[11px] font-bold text-slate-300">
                   {selectedObrigacaoIds.size} vinculada(s)
                 </span>
               </div>
             </div>
+
+            {obrigacoesFeedback && (
+              <p className="mt-3 rounded-lg border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs text-rose-100">
+                {obrigacoesFeedback}
+              </p>
+            )}
 
             <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
               <table className="w-full min-w-[720px] border-collapse text-left text-xs">
@@ -828,7 +861,7 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
                     </tr>
                   )}
 
-                  {!isLoadingObrigacoes && obrigacoes.map((obrigacao) => {
+                  {!isLoadingObrigacoes && obrigacoesDoRegime.map((obrigacao) => {
                     const checked = selectedObrigacaoIds.has(obrigacao.id);
 
                     return (
@@ -849,16 +882,24 @@ export default function ClienteForm({ mode = "create" }: ClienteFormProps) {
                           </button>
                         </td>
                         <td className="px-3 py-2 font-bold text-slate-100">{obrigacao.nome}</td>
-                        <td className="px-3 py-2 text-slate-400">{obrigacao.regime || "Sem regime"}</td>
+                        <td className="max-w-[220px] truncate px-3 py-2 text-slate-400" title={obrigacao.regime || ""}>
+                          {obrigacao.regime || "Todos os regimes"}
+                        </td>
                         <td className="px-3 py-2 text-slate-400">{obrigacao.periodicidade || "Sem periodicidade"}</td>
                         <td className="px-3 py-2 text-slate-400">{obrigacao.setor || "Sem setor"}</td>
                       </tr>
                     );
                   })}
 
-                  {!isLoadingObrigacoes && obrigacoes.length === 0 && (
+                  {!isLoadingObrigacoes && obrigacoesDoRegime.length === 0 && (
                     <tr>
-                      <td className="px-3 py-4 text-center text-slate-400" colSpan={5}>Nenhuma obrigacao cadastrada.</td>
+                      <td className="px-3 py-4 text-center text-slate-400" colSpan={5}>
+                        {obrigacoesFeedback
+                          ? "Nao foi possivel carregar as obrigacoes."
+                          : obrigacoes.length === 0
+                            ? "Nenhuma obrigacao cadastrada."
+                            : `Nenhuma obrigacao cadastrada para o regime ${form.regimeTributario}.`}
+                      </td>
                     </tr>
                   )}
                 </tbody>
