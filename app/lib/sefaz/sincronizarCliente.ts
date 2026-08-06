@@ -120,6 +120,10 @@ export async function sincronizarClienteNFe(params: {
   let lotes = 0;
   let interrompido = false;
   let ultimoMotivo = "";
+  // A SEFAZ pede uma hora de intervalo a partir do momento em que não há mais o
+  // que buscar — e não a partir de uma consulta que voltou vazia. Quem drena a
+  // fila trazendo documentos também chegou ao fim dela.
+  let fimDaFila = false;
 
   try {
     while (lotes < maxLotes) {
@@ -163,6 +167,7 @@ export async function sincronizarClienteNFe(params: {
         // Nada novo. Avançar o NSU mesmo assim, pois a SEFAZ pode ter pulado
         // faixas (documentos de terceiros que não nos cabem).
         if (lote.ultNSU && lote.ultNSU !== ultNSU) ultNSU = lote.ultNSU;
+        fimDaFila = true;
         break;
       }
 
@@ -190,7 +195,10 @@ export async function sincronizarClienteNFe(params: {
       ultNSU = lote.ultNSU || ultNSU;
 
       // Chegamos ao fim da fila da SEFAZ.
-      if (Number(lote.ultNSU) >= Number(lote.maxNSU)) break;
+      if (Number(lote.ultNSU) >= Number(lote.maxNSU)) {
+        fimDaFila = true;
+        break;
+      }
     }
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
@@ -210,7 +218,10 @@ export async function sincronizarClienteNFe(params: {
       ? "Nenhum documento novo."
       : `${importados} de ${encontrados} documentos importados.`;
 
-  await registrarEstado(supabase, cliente.id, ultNSU, status, mensagem, encontrados === 0);
+  // A janela vale por ter chegado ao fim da fila, com ou sem documento no
+  // caminho. Condicioná-la a `encontrados === 0` deixava sem intervalo justo a
+  // execução que drenou a fila — e a seguinte tomava 656 na certa.
+  await registrarEstado(supabase, cliente.id, ultNSU, status, mensagem, fimDaFila);
 
   return { ...base, status, encontrados, importados, erros, ultimoNsu: ultNSU, mensagem };
 }
