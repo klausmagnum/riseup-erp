@@ -4,7 +4,15 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+// APENAS PARA DESENVOLVIMENTO. Sem esta guarda a rota devolvia, sem login
+// nenhum, a tabela usuarios_sistema inteira — inclusive a coluna
+// senha_temporaria — e os e-mails do Supabase Auth. O middleware não protege
+// /api/dev, entao a guarda tem que estar aqui, como ja esta nas rotas irmas.
 export async function GET() {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Não permitido em produção" }, { status: 403 });
+  }
+
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     return NextResponse.json({ error: "Supabase não configurado" }, { status: 500 });
   }
