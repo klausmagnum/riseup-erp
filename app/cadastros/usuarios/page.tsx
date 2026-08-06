@@ -372,7 +372,9 @@ export default function UsuariosPage() {
       perfil: form.perfil,
       status: "Ativo",
       updated_at: new Date().toISOString(),
-      ...(form.senhaTemporaria.trim() ? { senha_temporaria: form.senhaTemporaria.trim() } : {}),
+      // A senha não é gravada aqui. Ela vai para o Supabase Auth, que é quem
+      // guarda credencial; a coluna senha_temporaria mantinha uma cópia legível
+      // do mesmo segredo, e foi ela que vazou por /api/dev/users-list.
     };
 
     if (editingId) {
@@ -386,8 +388,38 @@ export default function UsuariosPage() {
         return;
       }
 
+      // O campo de senha na edição é opcional. Preenchido, vai para o Auth pela
+      // mesma rota do botão de alterar senha — antes ele caía na coluna em texto
+      // claro, e agora seria ignorado em silêncio se não passasse por aqui.
+      if (form.senhaTemporaria.trim()) {
+        if (form.senhaTemporaria.trim().length < 8) {
+          setFeedback("Usuário atualizado, mas a senha não mudou: precisa de ao menos 8 caracteres.");
+          setEditingId(null);
+          setForm(emptyForm);
+          return;
+        }
+
+        const senhaResposta = await requestUsuariosApi("/api/auth/definir-senha", {
+          method: "POST",
+          body: JSON.stringify({ id: editingId, password: form.senhaTemporaria.trim() }),
+        });
+
+        if (!senhaResposta.response?.ok) {
+          setFeedback(
+            `Usuário atualizado, mas a senha não mudou: ${senhaResposta.result.error || "erro ao falar com o Supabase Auth."}`
+          );
+          setEditingId(null);
+          setForm(emptyForm);
+          return;
+        }
+      }
+
       setUsuarios((current) => current.map((usuario) => (usuario.id === editingId ? result.usuario as UsuarioSistema : usuario)));
-      setFeedback("Usuário atualizado com sucesso.");
+      setFeedback(
+        form.senhaTemporaria.trim()
+          ? "Usuário atualizado e senha alterada no Supabase Auth."
+          : "Usuário atualizado com sucesso."
+      );
       setEditingId(null);
       setForm(emptyForm);
       return;
@@ -455,20 +487,24 @@ export default function UsuariosPage() {
     setFeedback("Usuário excluído com sucesso.");
   }
 
+  /**
+   * Troca a senha do usuário no Supabase Auth.
+   *
+   * Antes isto gravava a senha em texto claro na coluna senha_temporaria e não
+   * falava com o Auth: a tela dizia que tinha dado certo e a senha de login do
+   * usuário continuava a mesma. Quem guarda a credencial é o Auth.
+   */
   async function alterarSenha(id: string) {
     setFeedback("");
 
-    if (!newPassword.trim()) {
-      setFeedback("Informe a nova senha temporária.");
+    if (newPassword.trim().length < 8) {
+      setFeedback("A nova senha precisa ter ao menos 8 caracteres.");
       return;
     }
 
-    const { response, result } = await requestUsuariosApi("/api/usuarios-sistema", {
-      method: "PATCH",
-      body: JSON.stringify({
-        id,
-        payload: { senha_temporaria: newPassword.trim(), updated_at: new Date().toISOString() },
-      }),
+    const { response, result } = await requestUsuariosApi("/api/auth/definir-senha", {
+      method: "POST",
+      body: JSON.stringify({ id, password: newPassword.trim() }),
     });
 
     if (!response?.ok) {
@@ -478,7 +514,7 @@ export default function UsuariosPage() {
 
     setPasswordId(null);
     setNewPassword("");
-    setFeedback("Senha temporária alterada com sucesso.");
+    setFeedback("Senha alterada no Supabase Auth. O usuario ja entra com ela.");
   }
 
   return (
