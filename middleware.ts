@@ -5,7 +5,10 @@ export function middleware(request: NextRequest) {
   const pathname = requestUrl.pathname;
 
   // Rotas públicas que não precisam de autenticação
-  const publicRoutes = ['/login', '/login-alt', '/setup'];
+  // /redefinir-senha e publica de proposito: quem chega nela vem do link de
+  // recuperacao e ainda nao tem sessao de trabalho. Exigir login ali tornaria a
+  // recuperacao de senha impossivel justamente para quem perdeu a senha.
+  const publicRoutes = ['/login', '/login-alt', '/setup', '/redefinir-senha'];
 
   // API endpoints e arquivos estáticos que não precisam proteger
   const excludedPaths = [

@@ -18,7 +18,46 @@ export default function LoginPage() {
   const [senha, setSenha] = useState("");
   const [lembrar, setLembrar] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [aviso, setAviso] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [enviandoRecuperacao, setEnviandoRecuperacao] = useState(false);
+
+  /**
+   * Envia o e-mail de recuperação de senha.
+   *
+   * O `redirectTo` vai explícito, e não por omissão: sem ele o Supabase usa o
+   * Site URL configurado no projeto, que apontava para localhost e mandava
+   * quem clicava no link do e-mail para uma máquina que não existe. Vindo de
+   * `window.location.origin`, o link acompanha de onde o pedido saiu — produção
+   * em produção, localhost no desenvolvimento.
+   *
+   * O endereço precisa estar na lista de Redirect URLs do projeto no Supabase;
+   * fora dela o Supabase ignora e volta ao Site URL.
+   */
+  async function handleRecuperarSenha() {
+    setFeedback("");
+    setAviso("");
+
+    if (!email.trim()) {
+      setFeedback("Informe o e-mail no campo acima para receber o link de recuperacao.");
+      return;
+    }
+
+    setEnviandoRecuperacao(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/redefinir-senha`,
+    });
+    setEnviandoRecuperacao(false);
+
+    if (error) {
+      setFeedback(`Nao foi possivel enviar o e-mail de recuperacao: ${error.message}`);
+      return;
+    }
+
+    // Resposta igual existindo ou não o e-mail: dizer "usuario nao encontrado"
+    // aqui entregaria a quem está de fora quais endereços têm conta.
+    setAviso("Se existir conta com esse e-mail, o link de recuperacao chegou na caixa de entrada.");
+  }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -167,12 +206,18 @@ export default function LoginPage() {
                   <input className="size-4 accent-sky-300" checked={lembrar} onChange={(event) => setLembrar(event.target.checked)} type="checkbox" />
                   Lembrar acesso
                 </label>
-                <button className="font-bold text-sky-300" type="button">
-                  Esqueci minha senha
+                <button
+                  className="font-bold text-sky-300 transition hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={enviandoRecuperacao}
+                  onClick={handleRecuperarSenha}
+                  type="button"
+                >
+                  {enviandoRecuperacao ? "Enviando..." : "Esqueci minha senha"}
                 </button>
               </div>
 
               {feedback && <p className="rounded-lg border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs text-rose-100">{feedback}</p>}
+              {aviso && <p className="rounded-lg border border-sky-300/25 bg-sky-300/10 px-3 py-2 text-xs text-sky-100">{aviso}</p>}
 
               <button
                 className="flex min-h-11 items-center justify-center rounded-lg bg-sky-300 px-4 text-sm font-black text-slate-950 shadow-[0_18px_42px_rgba(56,189,248,0.22)] transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
