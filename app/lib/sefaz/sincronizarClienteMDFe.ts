@@ -19,6 +19,15 @@ export const ORIGEM_MDFE = "SEFAZ/MDFeDistribuicaoDFe";
  *  ter documento novo. Mesma janela da NF-e e do CT-e. */
 const JANELA_BLOQUEIO_MS = 61 * 60 * 1000;
 
+/**
+ * Tempo reservado para processar um lote inteiro antes de pedir o próximo, e
+ * documentos gravados ao mesmo tempo dentro dele. Mesmo raciocínio da NF-e, em
+ * sincronizarCliente.ts: abandonar um lote pela metade faz a execução seguinte
+ * repedir uma faixa que a SEFAZ já entregou, e é isso que ela rejeita com 656.
+ */
+const RESERVA_POR_LOTE_MS = 60_000;
+const CONCORRENCIA_GRAVACAO = 6;
+
 export interface ClienteSincronizavelMDFe
   extends Omit<ClienteSincronizavel, "ultimo_nsu_nfe_recebida"> {
   ultimo_nsu_mdfe_recebida: number | null;
@@ -70,10 +79,15 @@ export async function sincronizarClienteMDFe(params: {
   let erros = 0;
   let lotes = 0;
   let interrompido = false;
+  // A hora de intervalo conta a partir de não haver mais o que buscar, e não de
+  // uma consulta que voltou vazia: quem drena a fila trazendo documentos também
+  // chegou ao fim dela.
+  let fimDaFila = false;
 
   try {
     while (lotes < maxLotes) {
-      if (Date.now() > params.deadline) {
+      // A folga é para o lote inteiro, não para a chamada.
+      if (Date.now() + RESERVA_POR_LOTE_MS > params.deadline) {
         interrompido = true;
         break;
       }
@@ -108,6 +122,7 @@ export async function sincronizarClienteMDFe(params: {
       if (lote.cStat === CSTAT.NENHUM_DOCUMENTO) {
         // A SEFAZ pode pular faixas de NSU; avançar mesmo assim.
         if (lote.ultNSU && lote.ultNSU !== ultNSU) ultNSU = lote.ultNSU;
+        fimDaFila = true;
         break;
       }
 
@@ -125,31 +140,19 @@ export async function sincronizarClienteMDFe(params: {
 
       encontrados += lote.documentos.length;
 
-      for (const doc of lote.documentos) {
-        if (Date.now() > params.deadline) {
-          interrompido = true;
-          break;
-        }
-
-        try {
-          const gravado = await gravarDocumento(supabase, cliente, doc, cnpj);
-          if (gravado) importados += 1;
-          ultNSU = doc.nsu || ultNSU;
-        } catch (error) {
-          erros += 1;
-          console.error(
-            `[mdfe] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
-            error instanceof Error ? error.message : error
-          );
-        }
-      }
-
-      if (interrompido) break;
+      // O lote é sempre processado inteiro, e o NSU acompanha o que a SEFAZ
+      // entregou — é o dela que a próxima chamada tem de devolver.
+      const gravacao = await gravarLote(supabase, cliente, lote.documentos, cnpj);
+      importados += gravacao.importados;
+      erros += gravacao.erros;
 
       ultNSU = lote.ultNSU || ultNSU;
 
       // Fim da fila.
-      if (Number(lote.ultNSU) >= Number(lote.maxNSU)) break;
+      if (Number(lote.ultNSU) >= Number(lote.maxNSU)) {
+        fimDaFila = true;
+        break;
+      }
     }
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
@@ -169,9 +172,49 @@ export async function sincronizarClienteMDFe(params: {
       ? "Nenhum documento novo."
       : `${importados} de ${encontrados} documentos importados.`;
 
-  await registrarEstado(supabase, cliente.id, ultNSU, status, mensagem, encontrados === 0);
+  await registrarEstado(supabase, cliente.id, ultNSU, status, mensagem, fimDaFila);
 
   return { ...base, status, encontrados, importados, erros, ultimoNsu: ultNSU, mensagem };
+}
+
+/**
+ * Grava os documentos de um lote, alguns ao mesmo tempo — é o que faz o lote
+ * inteiro caber no orçamento. Ver gravarLote em sincronizarCliente.ts.
+ *
+ * Aqui não há o varredor de resumo que a NF-e e o CT-e têm: a SVRS não publica
+ * resMDFe, e quem é ator do manifesto recebe o procMDFe integral. Sem resumo,
+ * não há o que a chegada do XML completo possa aposentar.
+ */
+async function gravarLote(
+  supabase: SupabaseClient,
+  cliente: ClienteSincronizavelMDFe,
+  documentos: Array<{ nsu: string; schema: string; xml: string }>,
+  cnpjCliente: string
+): Promise<{ importados: number; erros: number }> {
+  let importados = 0;
+  let erros = 0;
+
+  const fila = [...documentos];
+
+  async function trabalhador() {
+    for (let doc = fila.shift(); doc; doc = fila.shift()) {
+      try {
+        if (await gravarDocumento(supabase, cliente, doc, cnpjCliente)) importados += 1;
+      } catch (error) {
+        erros += 1;
+        console.error(
+          `[mdfe] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCORRENCIA_GRAVACAO, fila.length) }, trabalhador)
+  );
+
+  return { importados, erros };
 }
 
 async function gravarDocumento(

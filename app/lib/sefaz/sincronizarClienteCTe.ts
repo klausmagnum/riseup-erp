@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buscarLoteDFe, CSTAT, type SefazEnvironment } from "./distribuicaoDFe";
 import { normalizarDocumentoCTe } from "./parseCTe";
 import { carregarCertificado, type RegistroCertificado } from "./certificado";
-import { gravarDocumentoCapturado } from "./gravarDocumento";
+import { gravarDocumentoCapturado, substituirResumo } from "./gravarDocumento";
 import type { ClienteSincronizavel, ResultadoSincronizacao } from "./sincronizarCliente";
 
 /**
@@ -18,6 +18,15 @@ export const ORIGEM_CTE = "SEFAZ/CTeDistribuicaoDFe";
 /** A SEFAZ derruba o CNPJ por uma hora quando ele consulta repetidamente sem
  *  ter documento novo. Mesma janela da NF-e. */
 const JANELA_BLOQUEIO_MS = 61 * 60 * 1000;
+
+/**
+ * Tempo reservado para processar um lote inteiro antes de pedir o próximo, e
+ * documentos gravados ao mesmo tempo dentro dele. Mesmo raciocínio da NF-e, em
+ * sincronizarCliente.ts: abandonar um lote pela metade faz a execução seguinte
+ * repedir uma faixa que a SEFAZ já entregou, e é isso que ela rejeita com 656.
+ */
+const RESERVA_POR_LOTE_MS = 60_000;
+const CONCORRENCIA_GRAVACAO = 6;
 
 export interface ClienteSincronizavelCTe extends Omit<ClienteSincronizavel, "ultimo_nsu_nfe_recebida"> {
   ultimo_nsu_cte_recebida: number | null;
@@ -69,10 +78,15 @@ export async function sincronizarClienteCTe(params: {
   let erros = 0;
   let lotes = 0;
   let interrompido = false;
+  // A hora de intervalo conta a partir de não haver mais o que buscar, e não de
+  // uma consulta que voltou vazia: quem drena a fila trazendo documentos também
+  // chegou ao fim dela.
+  let fimDaFila = false;
 
   try {
     while (lotes < maxLotes) {
-      if (Date.now() > params.deadline) {
+      // A folga é para o lote inteiro, não para a chamada.
+      if (Date.now() + RESERVA_POR_LOTE_MS > params.deadline) {
         interrompido = true;
         break;
       }
@@ -107,6 +121,7 @@ export async function sincronizarClienteCTe(params: {
       if (lote.cStat === CSTAT.NENHUM_DOCUMENTO) {
         // A SEFAZ pode pular faixas de NSU; avançar mesmo assim.
         if (lote.ultNSU && lote.ultNSU !== ultNSU) ultNSU = lote.ultNSU;
+        fimDaFila = true;
         break;
       }
 
@@ -124,31 +139,19 @@ export async function sincronizarClienteCTe(params: {
 
       encontrados += lote.documentos.length;
 
-      for (const doc of lote.documentos) {
-        if (Date.now() > params.deadline) {
-          interrompido = true;
-          break;
-        }
-
-        try {
-          const gravado = await gravarDocumento(supabase, cliente, doc, cnpj);
-          if (gravado) importados += 1;
-          ultNSU = doc.nsu || ultNSU;
-        } catch (error) {
-          erros += 1;
-          console.error(
-            `[cte] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
-            error instanceof Error ? error.message : error
-          );
-        }
-      }
-
-      if (interrompido) break;
+      // O lote é sempre processado inteiro, e o NSU acompanha o que a SEFAZ
+      // entregou — é o dela que a próxima chamada tem de devolver.
+      const gravacao = await gravarLote(supabase, cliente, lote.documentos, cnpj);
+      importados += gravacao.importados;
+      erros += gravacao.erros;
 
       ultNSU = lote.ultNSU || ultNSU;
 
       // Fim da fila.
-      if (Number(lote.ultNSU) >= Number(lote.maxNSU)) break;
+      if (Number(lote.ultNSU) >= Number(lote.maxNSU)) {
+        fimDaFila = true;
+        break;
+      }
     }
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
@@ -168,9 +171,55 @@ export async function sincronizarClienteCTe(params: {
       ? "Nenhum documento novo."
       : `${importados} de ${encontrados} documentos importados.`;
 
-  await registrarEstado(supabase, cliente.id, ultNSU, status, mensagem, encontrados === 0);
+  await registrarEstado(supabase, cliente.id, ultNSU, status, mensagem, fimDaFila);
 
   return { ...base, status, encontrados, importados, erros, ultimoNsu: ultNSU, mensagem };
+}
+
+/**
+ * Grava os documentos de um lote, alguns ao mesmo tempo — é o que faz o lote
+ * inteiro caber no orçamento. Ver gravarLote em sincronizarCliente.ts.
+ */
+async function gravarLote(
+  supabase: SupabaseClient,
+  cliente: ClienteSincronizavelCTe,
+  documentos: Array<{ nsu: string; schema: string; xml: string }>,
+  cnpjCliente: string
+): Promise<{ importados: number; erros: number }> {
+  let importados = 0;
+  let erros = 0;
+
+  const fila = [...documentos];
+  // O CT-e tem resumo (resCTe), e o integral da mesma nota aposenta o dela. Em
+  // paralelo a ordem deixa de ser garantida, então a marcação é refeita no fim
+  // do lote, quando os dois já estão gravados.
+  const chavesCompletas = new Set<string>();
+
+  async function trabalhador() {
+    for (let doc = fila.shift(); doc; doc = fila.shift()) {
+      try {
+        const gravado = await gravarDocumento(supabase, cliente, doc, cnpjCliente);
+        if (gravado.importado) importados += 1;
+        if (gravado.chaveCompleta) chavesCompletas.add(gravado.chaveCompleta);
+      } catch (error) {
+        erros += 1;
+        console.error(
+          `[cte] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCORRENCIA_GRAVACAO, fila.length) }, trabalhador)
+  );
+
+  for (const chave of chavesCompletas) {
+    await substituirResumo(supabase, cliente.id, chave);
+  }
+
+  return { importados, erros };
 }
 
 async function gravarDocumento(
@@ -178,15 +227,15 @@ async function gravarDocumento(
   cliente: ClienteSincronizavelCTe,
   doc: { nsu: string; schema: string; xml: string },
   cnpjCliente: string
-): Promise<boolean> {
+): Promise<{ importado: boolean; chaveCompleta: string | null }> {
   const normalizado = await normalizarDocumentoCTe(doc, {
     cnpjCliente,
     nomeCliente: cliente.razao_social,
   });
 
-  if (!normalizado) return false;
+  if (!normalizado) return { importado: false, chaveCompleta: null };
 
-  return gravarDocumentoCapturado({
+  const importado = await gravarDocumentoCapturado({
     supabase,
     cliente,
     documento: normalizado,
@@ -197,6 +246,11 @@ async function gravarDocumento(
     // escritório a uma tela da SEFAZ que não existe para esse documento.
     registrarPendenciaDeManifestacao: false,
   });
+
+  const chaveCompleta =
+    normalizado.completude === "completo" ? normalizado.chave_acesso : null;
+
+  return { importado, chaveCompleta: chaveCompleta || null };
 }
 
 async function registrarEstado(
