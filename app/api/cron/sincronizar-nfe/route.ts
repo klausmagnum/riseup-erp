@@ -23,9 +23,10 @@ export const maxDuration = 300;
 
 // Deixa folga para gravar o resumo antes de a função ser cortada.
 const RESERVA_FINAL_MS = 20_000;
-// Cada cliente recebe uma fatia, para um cliente com muito atraso não
-// monopolizar a execução inteira. Quem for interrompido retoma no NSU exato.
-const ORCAMENTO_POR_CLIENTE_MS = 60_000;
+// O orçamento é repartido entre os clientes que faltam, para um cliente com
+// muito atraso não monopolizar a execução. O piso existe porque uma fatia menor
+// que isso não cobre nem um lote da SEFAZ: quem recebe menos para de vez.
+const ORCAMENTO_MINIMO_MS = 90_000;
 
 function autorizado(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -77,29 +78,42 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, processados: 0, mensagem: "Fila vazia." });
   }
 
+  // Os certificados vêm de uma vez só. Consultar um por cliente dentro do laço
+  // custava um round-trip por cliente sem certificado — quase todos — e ainda
+  // fazia o orçamento ser repartido com quem nunca chegaria a sincronizar.
+  const { data: certificados } = await supabase
+    .from("cliente_certificados")
+    .select("id,cliente_id,nome,drive_file_id,senha_criptografada,data_validade,ativo")
+    .eq("ativo", true)
+    .is("deleted_at", null)
+    .in("cliente_id", clientes.map((c) => c.id))
+    .order("cliente_id", { ascending: true })
+    .order("principal", { ascending: false })
+    .returns<RegistroCertificado[]>();
+
+  const certificadoDoCliente = new Map<string, RegistroCertificado>();
+  for (const certificado of certificados ?? []) {
+    // A ordenação põe o principal na frente; o primeiro de cada cliente vence.
+    if (!certificadoDoCliente.has(certificado.cliente_id)) {
+      certificadoDoCliente.set(certificado.cliente_id, certificado);
+    }
+  }
+
+  const elegiveis = clientes.filter((c) => certificadoDoCliente.has(c.id));
+  const semCertificado = clientes
+    .filter((c) => !certificadoDoCliente.has(c.id))
+    .map((c) => c.razao_social);
+
   const limiteGlobal = inicio + (maxDuration * 1000 - RESERVA_FINAL_MS);
   const resultados: ResultadoSincronizacao[] = [];
-  const semCertificado: string[] = [];
-  let restantes = clientes.length;
+  let pendentes = elegiveis.length;
 
-  for (const cliente of clientes) {
+  for (const cliente of elegiveis) {
     if (Date.now() > limiteGlobal) break;
-    restantes -= 1;
 
-    const { data: certificado } = await supabase
-      .from("cliente_certificados")
-      .select("id,cliente_id,nome,drive_file_id,senha_criptografada,data_validade,ativo")
-      .eq("cliente_id", cliente.id)
-      .eq("ativo", true)
-      .is("deleted_at", null)
-      .order("principal", { ascending: false })
-      .limit(1)
-      .maybeSingle<RegistroCertificado>();
-
-    if (!certificado) {
-      semCertificado.push(cliente.razao_social);
-      continue;
-    }
+    const certificado = certificadoDoCliente.get(cliente.id)!;
+    const fatia = Math.max(ORCAMENTO_MINIMO_MS, (limiteGlobal - Date.now()) / pendentes);
+    pendentes -= 1;
 
     const { data: execucao } = await supabase
       .from("documentos_fiscais_sincronizacoes")
@@ -114,10 +128,7 @@ export async function GET(request: Request) {
       .select("id")
       .single();
 
-    const deadlineCliente = Math.min(
-      limiteGlobal,
-      Date.now() + ORCAMENTO_POR_CLIENTE_MS
-    );
+    const deadlineCliente = Math.min(limiteGlobal, Date.now() + fatia);
 
     const resultado = await sincronizarClienteNFe({
       supabase,
@@ -151,7 +162,7 @@ export async function GET(request: Request) {
     ok: true,
     duracaoMs: Date.now() - inicio,
     processados: resultados.length,
-    naoAlcancados: restantes,
+    naoAlcancados: elegiveis.length - resultados.length,
     documentosImportados: importados,
     clientesComErro: comErro.map((r) => ({ cliente: r.cliente, mensagem: r.mensagem })),
     clientesSemCertificado: semCertificado,

@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buscarLoteDFe, CSTAT, type SefazEnvironment } from "./distribuicaoDFe";
 import { normalizarDocumento } from "./parseDocumento";
 import { carregarCertificado, type RegistroCertificado } from "./certificado";
-import { gravarDocumentoCapturado } from "./gravarDocumento";
+import { gravarDocumentoCapturado, substituirResumo } from "./gravarDocumento";
 
 /** Fila da distribuição da NF-e. Identifica o fluxo na deduplicação. */
 export const ORIGEM_NFE = "SEFAZ/DistribuicaoDFe";
@@ -34,6 +34,26 @@ export interface ResultadoSincronizacao {
  * CNPJ por 1 hora. Respeitamos essa janela no agendamento.
  */
 const JANELA_BLOQUEIO_MS = 61 * 60 * 1000;
+
+/**
+ * Tempo reservado para processar um lote inteiro antes de pedir o próximo.
+ *
+ * Pedir um lote que não caiba no tempo restante é pior do que parar: a SEFAZ
+ * marca a faixa como entregue, e o que sobrar teria de ser pedido de novo na
+ * execução seguinte — que é exatamente o que ela rejeita com 656 ("deve ser
+ * utilizado o ultNSU nas solicitações subsequentes"). Era esse repedido que
+ * derrubava o CNPJ por uma hora em metade das execuções.
+ */
+const RESERVA_POR_LOTE_MS = 60_000;
+
+/**
+ * Documentos gravados ao mesmo tempo dentro de um lote.
+ *
+ * Cada documento custa quatro a seis idas ao Supabase e ao Drive, uma de cada
+ * vez: em série o lote de 50 passava de dois minutos. O limite existe para não
+ * abrir 50 uploads simultâneos no Drive.
+ */
+const CONCORRENCIA_GRAVACAO = 6;
 
 /**
  * Sincroniza um cliente, paginando pelo NSU até esgotar a distribuição ou o
@@ -103,7 +123,9 @@ export async function sincronizarClienteNFe(params: {
 
   try {
     while (lotes < maxLotes) {
-      if (Date.now() > params.deadline) {
+      // A folga é para o lote inteiro, não para a chamada: um lote pedido pela
+      // metade vira repedido na próxima execução, e repedido vira 656.
+      if (Date.now() + RESERVA_POR_LOTE_MS > params.deadline) {
         interrompido = true;
         break;
       }
@@ -158,31 +180,12 @@ export async function sincronizarClienteNFe(params: {
 
       encontrados += lote.documentos.length;
 
-      for (const doc of lote.documentos) {
-        // Cada documento custa uma escrita no banco e um upload ao Drive. Sem
-        // conferir o prazo aqui, um lote de 50 rodava inteiro mesmo depois de
-        // estourado o orçamento — e o NSU só avançava no fim do lote.
-        if (Date.now() > params.deadline) {
-          interrompido = true;
-          break;
-        }
-
-        try {
-          const gravado = await gravarDocumento(supabase, cliente, doc, cnpj);
-          if (gravado) importados += 1;
-          // Avança documento a documento: se a execução for cortada no meio do
-          // lote, a próxima retoma exatamente daqui em vez de reprocessar tudo.
-          ultNSU = doc.nsu || ultNSU;
-        } catch (error) {
-          erros += 1;
-          console.error(
-            `[sefaz] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
-            error instanceof Error ? error.message : error
-          );
-        }
-      }
-
-      if (interrompido) break;
+      // O lote é sempre processado inteiro. O NSU acompanha o que a SEFAZ
+      // entregou, e não o último documento gravado, porque é o dela que a
+      // próxima chamada tem de devolver.
+      const gravacao = await gravarLote(supabase, cliente, lote.documentos, cnpj);
+      importados += gravacao.importados;
+      erros += gravacao.erros;
 
       ultNSU = lote.ultNSU || ultNSU;
 
@@ -212,22 +215,73 @@ export async function sincronizarClienteNFe(params: {
   return { ...base, status, encontrados, importados, erros, ultimoNsu: ultNSU, mensagem };
 }
 
-/** Grava o documento e arquiva o XML. Devolve false se já existia. */
+/**
+ * Grava os documentos de um lote, alguns ao mesmo tempo.
+ *
+ * Em série cada documento levava cerca de dois segundos e meio — a consulta de
+ * duplicidade, o upload do XML e a inserção, um round-trip de cada vez —, e o
+ * lote de 50 estourava qualquer orçamento razoável. Em paralelo o mesmo lote
+ * sai em torno de vinte segundos, que é o que torna possível processá-lo
+ * inteiro antes de pedir o próximo.
+ */
+async function gravarLote(
+  supabase: SupabaseClient,
+  cliente: ClienteSincronizavel,
+  documentos: Array<{ nsu: string; schema: string; xml: string }>,
+  cnpjCliente: string
+): Promise<{ importados: number; erros: number }> {
+  let importados = 0;
+  let erros = 0;
+
+  const fila = [...documentos];
+  // O XML integral de uma nota aposenta o resumo dela, e os dois podem cair no
+  // mesmo lote. Em paralelo a ordem deixa de ser garantida, então a marcação é
+  // refeita no fim do lote, quando ambos já estão gravados.
+  const chavesCompletas = new Set<string>();
+
+  async function trabalhador() {
+    for (let doc = fila.shift(); doc; doc = fila.shift()) {
+      try {
+        const gravado = await gravarDocumento(supabase, cliente, doc, cnpjCliente);
+        if (gravado.importado) importados += 1;
+        if (gravado.chaveCompleta) chavesCompletas.add(gravado.chaveCompleta);
+      } catch (error) {
+        erros += 1;
+        console.error(
+          `[sefaz] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCORRENCIA_GRAVACAO, fila.length) }, trabalhador)
+  );
+
+  for (const chave of chavesCompletas) {
+    await substituirResumo(supabase, cliente.id, chave);
+  }
+
+  return { importados, erros };
+}
+
+/** Grava o documento e arquiva o XML. `importado` é false se já existia. */
 async function gravarDocumento(
   supabase: SupabaseClient,
   cliente: ClienteSincronizavel,
   doc: { nsu: string; schema: string; xml: string },
   cnpjCliente: string
-): Promise<boolean> {
+): Promise<{ importado: boolean; chaveCompleta: string | null }> {
   const normalizado = await normalizarDocumento(doc, {
     cnpjCliente,
     nomeCliente: cliente.razao_social,
   });
 
   // Schema que não interessa ao módulo — só avançamos o NSU.
-  if (!normalizado) return false;
+  if (!normalizado) return { importado: false, chaveCompleta: null };
 
-  return gravarDocumentoCapturado({
+  const importado = await gravarDocumentoCapturado({
     supabase,
     cliente,
     documento: normalizado,
@@ -235,6 +289,11 @@ async function gravarDocumento(
     origem: ORIGEM_NFE,
     nsu: doc.nsu,
   });
+
+  const chaveCompleta =
+    normalizado.completude === "completo" ? normalizado.chave_acesso : null;
+
+  return { importado, chaveCompleta: chaveCompleta || null };
 }
 
 async function registrarEstado(

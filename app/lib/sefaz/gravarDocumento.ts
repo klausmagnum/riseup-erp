@@ -222,7 +222,7 @@ export async function gravarDocumentoCapturado(entrada: EntradaGravacao): Promis
  * São registros distintos, então ambos ficam gravados; sem marcar o antigo, a
  * mesma nota aparece duas vezes para quem consulta.
  */
-async function substituirResumo(
+export async function substituirResumo(
   supabase: SupabaseClient,
   clienteId: string,
   chave: string
