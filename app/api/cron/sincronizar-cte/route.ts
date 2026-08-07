@@ -18,7 +18,12 @@ export const maxDuration = 300;
  */
 
 const RESERVA_FINAL_MS = 20_000;
-const ORCAMENTO_POR_CLIENTE_MS = 60_000;
+// O orçamento é repartido entre os clientes que faltam, com o mesmo piso da
+// NF-e. O piso não é folga: sincronizarClienteCTe reserva um lote inteiro
+// (RESERVA_POR_LOTE_MS) antes de pedir o próximo, então uma fatia do tamanho
+// dessa reserva faz o laço sair antes da primeira consulta e o fluxo parar de
+// vez, sem sequer falar com a SEFAZ.
+const ORCAMENTO_MINIMO_MS = 90_000;
 
 function autorizado(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -77,6 +82,8 @@ export async function GET(request: Request) {
 
   for (const cliente of clientes) {
     if (Date.now() > limiteGlobal) break;
+
+    const fatia = Math.max(ORCAMENTO_MINIMO_MS, (limiteGlobal - Date.now()) / restantes);
     restantes -= 1;
 
     const { data: certificado } = await supabase
@@ -112,7 +119,7 @@ export async function GET(request: Request) {
       cliente,
       certificado,
       ambiente: "producao",
-      deadline: Math.min(limiteGlobal, Date.now() + ORCAMENTO_POR_CLIENTE_MS),
+      deadline: Math.min(limiteGlobal, Date.now() + fatia),
     });
 
     resultados.push(resultado);
