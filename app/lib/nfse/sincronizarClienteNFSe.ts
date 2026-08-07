@@ -22,6 +22,25 @@ import { ensureDocumentoFolder, uploadTextFile } from "../googleDriveServer";
  *  no índice de deduplicação. */
 export const ORIGEM_ADN = "ADN/NFSeNacional";
 
+/**
+ * Tempo reservado para processar um lote inteiro antes de pedir o próximo.
+ *
+ * Mesmo raciocínio da NF-e, em sincronizarCliente.ts: pedir um lote que não
+ * caiba no tempo restante é pior do que parar. O ADN marca a faixa de NSU como
+ * entregue, e o que sobrar teria de ser pedido de novo na execução seguinte —
+ * consumo repetido é o que ele recusa com HTTP 429. A fila do ADN nunca
+ * acumulou até hoje porque só há um cliente; o cenário que morde é a primeira
+ * sincronização de cada cliente novo, que começa com meses de atraso.
+ */
+const RESERVA_POR_LOTE_MS = 60_000;
+
+/**
+ * Documentos gravados ao mesmo tempo dentro de um lote. É o que faz o lote de
+ * 50 caber no orçamento: cada documento custa idas ao Supabase e ao Drive, e em
+ * série o lote passava de dois minutos.
+ */
+const CONCORRENCIA_GRAVACAO = 6;
+
 export interface ClienteSincronizavelNFSe {
   id: string;
   razao_social: string;
@@ -94,7 +113,9 @@ export async function sincronizarClienteNFSe(params: {
 
   try {
     while (lotes < maxLotes) {
-      if (Date.now() > params.deadline) {
+      // A folga é para o lote inteiro, não para a chamada: um lote abandonado
+      // pela metade vira repedido na execução seguinte, e repedido vira 429.
+      if (Date.now() + RESERVA_POR_LOTE_MS > params.deadline) {
         interrompido = true;
         break;
       }
@@ -121,41 +142,20 @@ export async function sincronizarClienteNFSe(params: {
       // Lote vazio é o fim da fila.
       if (lote.documentos.length === 0) break;
 
-      // Guardado antes de processar: o laço de documentos avança o ultNSU, e
-      // sem esta referência a checagem de progresso no fim compararia o NSU
-      // consigo mesmo e encerraria depois de um único lote.
-      const nsuAntesDoLote = Number(ultNSU);
-
       encontrados += lote.documentos.length;
 
-      for (const doc of lote.documentos) {
-        // Cada documento custa uma escrita no banco e um upload ao Drive.
-        if (Date.now() > params.deadline) {
-          interrompido = true;
-          break;
-        }
+      // O lote é sempre processado inteiro, e o NSU acompanha o que o ADN
+      // entregou — e não o último documento gravado. Diferente da SEFAZ, o
+      // ultNSU do ADN não vem declarado na resposta: é o maior NSU do lote,
+      // calculado em parseEnvelopeADN. Só avança depois do lote inteiro para
+      // que uma interrupção nunca deixe a faixa pela metade.
+      const gravacao = await gravarLote(supabase, cliente, lote.documentos, cnpj);
+      importados += gravacao.importados;
+      erros += gravacao.erros;
 
-        try {
-          const gravado = await gravarDocumento(supabase, cliente, doc, cnpj);
-          if (gravado) importados += 1;
-          // Avança documento a documento: se a execução for cortada no meio do
-          // lote, a próxima retoma exatamente daqui.
-          ultNSU = doc.nsu || ultNSU;
-        } catch (error) {
-          erros += 1;
-          console.error(
-            `[adn] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
-            error instanceof Error ? error.message : error
-          );
-        }
-      }
-
-      if (interrompido) break;
-
-      // Sem avanço em relação ao início do lote, o laço repetiria o mesmo
-      // trecho da fila para sempre.
-      if (Number(lote.ultNSU) <= nsuAntesDoLote) break;
-      ultNSU = String(Math.max(Number(ultNSU), Number(lote.ultNSU)));
+      // Sem avanço, o laço repetiria o mesmo trecho da fila para sempre.
+      if (Number(lote.ultNSU) <= Number(ultNSU)) break;
+      ultNSU = lote.ultNSU;
     }
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
@@ -178,6 +178,43 @@ export async function sincronizarClienteNFSe(params: {
   await registrarEstado(supabase, cliente.id, ultNSU, status, mensagem, false);
 
   return { ...base, status, encontrados, importados, erros, ultimoNsu: ultNSU, mensagem };
+}
+
+/**
+ * Grava os documentos de um lote, alguns ao mesmo tempo. Ver gravarLote em
+ * sincronizarCliente.ts: é o que permite processar o lote inteiro dentro do
+ * orçamento em vez de abandoná-lo no meio.
+ */
+async function gravarLote(
+  supabase: SupabaseClient,
+  cliente: ClienteSincronizavelNFSe,
+  documentos: DocumentoADN[],
+  cnpjCliente: string
+): Promise<{ importados: number; erros: number }> {
+  let importados = 0;
+  let erros = 0;
+
+  const fila = [...documentos];
+
+  async function trabalhador() {
+    for (let doc = fila.shift(); doc; doc = fila.shift()) {
+      try {
+        if (await gravarDocumento(supabase, cliente, doc, cnpjCliente)) importados += 1;
+      } catch (error) {
+        erros += 1;
+        console.error(
+          `[adn] cliente=${cliente.id} nsu=${doc.nsu} falhou:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCORRENCIA_GRAVACAO, fila.length) }, trabalhador)
+  );
+
+  return { importados, erros };
 }
 
 /** Nome do arquivo no Drive. A chave da NFS-e identifica a nota; o evento
