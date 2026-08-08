@@ -168,9 +168,12 @@ export default function TarefasPage() {
       </section>
 
       {selectedTarefa && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
-          <section className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#061020] p-5 shadow-2xl shadow-black/40">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+          {/* Altura presa a da janela e rolagem so no meio: com muitas
+              subtarefas o conteudo passa da tela, e sem isto ele vazava sem
+              rolar — o Fechar ficava fora de alcance. */}
+          <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#061020] shadow-2xl shadow-black/40">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 p-5">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sky-300">Detalhes da tarefa</p>
                 <h2 className="mt-1 text-xl font-black text-slate-100">{selectedTarefa.titulo}</h2>
@@ -180,7 +183,8 @@ export default function TarefasPage() {
               </button>
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-3 text-xs max-[640px]:grid-cols-1">
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <div className="grid grid-cols-2 gap-3 text-xs max-[640px]:grid-cols-1">
               <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
                 <span className="text-slate-500">Tipo</span>
                 <strong className="mt-1 block text-slate-100">{selectedTarefa.tipo}</strong>
@@ -226,6 +230,7 @@ export default function TarefasPage() {
                   <p className="mt-1 text-slate-100">Nenhuma subtarefa cadastrada.</p>
                 )}
               </div>
+            </div>
             </div>
           </section>
         </div>
