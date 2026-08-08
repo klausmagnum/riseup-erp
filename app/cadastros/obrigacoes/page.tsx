@@ -210,9 +210,11 @@ export default function ObrigacoesPage() {
       </section>
 
       {selectedObrigacao && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 px-4 py-6 backdrop-blur-sm">
-          <section className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#061020] p-5 shadow-2xl shadow-black/40">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/78 px-4 py-6 backdrop-blur-sm">
+          {/* Altura presa a da tela, cabecalho fixo e rolagem so no corpo: sem
+              isto o modal vaza em tela baixa e o Fechar sai de alcance. */}
+          <section className="flex max-h-[calc(100dvh-3rem)] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#061020] shadow-2xl shadow-black/40">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 p-5">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sky-300">Detalhes da obrigação</p>
                 <h2 className="mt-1 text-xl font-black text-slate-100">{selectedObrigacao.nome}</h2>
@@ -221,11 +223,13 @@ export default function ObrigacoesPage() {
                 Fechar
               </button>
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-3 max-[640px]:grid-cols-1">
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <div className="grid grid-cols-2 gap-3 max-[640px]:grid-cols-1">
               <div className="rounded-xl border border-white/10 bg-white/[0.045] p-3"><small className="block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Regime tributário</small><p className="mt-1 text-xs leading-5 text-slate-200">{selectedObrigacao.regime}</p></div>
               <div className="rounded-xl border border-white/10 bg-white/[0.045] p-3"><small className="block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Setor responsável</small><p className="mt-1 text-xs text-slate-200">{selectedObrigacao.setor}</p></div>
               <div className="rounded-xl border border-white/10 bg-white/[0.045] p-3"><small className="block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Periodicidade</small><p className="mt-1 text-xs text-slate-200">{selectedObrigacao.periodicidade}</p></div>
               <div className="rounded-xl border border-white/10 bg-white/[0.045] p-3"><small className="block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Prazo de vencimento</small><p className="mt-1 text-xs text-slate-200">{selectedObrigacao.prazo}</p></div>
+            </div>
             </div>
           </section>
         </div>

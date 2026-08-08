@@ -710,9 +710,13 @@ export default function UsuariosPage() {
       </section>
 
       {permissionsUser && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
-          <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10 bg-[#061020] shadow-2xl shadow-black/40">
-            <header className="flex items-start justify-between gap-4 border-b border-white/10 p-5 max-[640px]:grid">
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+          {/* O corpo mede o que sobra entre cabecalho e rodape em vez de
+              descontar uma altura fixa: em tela estreita o cabecalho quebra em
+              varias linhas e a conta antiga (90vh - 156px) escondia o rodape,
+              levando junto o botao de salvar. */}
+          <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#061020] shadow-2xl shadow-black/40">
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 p-5 max-[640px]:grid">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sky-300">Permissões</p>
                 <h2 className="mt-1 text-xl font-black text-slate-100">{permissionsUser.nome}</h2>
@@ -743,7 +747,7 @@ export default function UsuariosPage() {
               </div>
             </header>
 
-            <div className="max-h-[calc(90vh-156px)] overflow-y-auto p-5">
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
                 {permissionGroups.map((group) => (
                   <section className="rounded-xl border border-white/10 bg-white/[0.04] p-4" key={group.title}>
@@ -776,7 +780,7 @@ export default function UsuariosPage() {
               </div>
             </div>
 
-            <footer className="flex justify-end gap-2 border-t border-white/10 p-4 max-[560px]:grid">
+            <footer className="flex shrink-0 justify-end gap-2 border-t border-white/10 p-4 max-[560px]:grid">
               <button
                 className="min-h-10 rounded-lg border border-white/10 px-4 text-xs font-bold text-slate-300 transition hover:border-sky-300/30 hover:text-sky-100"
                 onClick={() => setPermissionsUser(null)}
