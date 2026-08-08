@@ -3,7 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { currentUserStorageKey } from "@/app/components/TopbarUser";
 import { supabase } from "@/app/lib/supabaseClient";
+import { requisitarApi } from "@/app/lib/apiClient";
 import { loadTasks, saveTasks, Tarefa } from "@/app/cadastros/tarefas/tarefaStorage";
+import {
+  gerarAgendaPessoal,
+  nomeDoCliente,
+  type ClienteDaTarefa,
+  type OcorrenciaTarefaPessoal,
+  type TarefaPessoal,
+  type TarefasPessoaisApiResponse,
+} from "@/app/lib/tarefasPessoais";
 
 type Obrigacao = {
   id: string;
@@ -96,7 +105,11 @@ type AgendaTarefa = Tarefa & {
 
 type AgendaItem =
   | { tipoAgenda: "obrigacao"; sortDate: Date | null; item: AgendaObrigacao }
-  | { tipoAgenda: "tarefa"; sortDate: Date; item: AgendaTarefa };
+  | { tipoAgenda: "tarefa"; sortDate: Date; item: AgendaTarefa }
+  // Tarefa pessoal do My Desktop: entra na mesma fila por data, mas so aparece
+  // para quem a cadastrou — a rota /api/tarefas-pessoais nunca devolve as dos
+  // outros usuarios.
+  | { tipoAgenda: "pessoal"; sortDate: Date; item: OcorrenciaTarefaPessoal };
 
 const periodicidadeOrder = ["Mensal", "Quinzenal", "Decendial", "Trimestral", "Semestral", "Anual"];
 const finalizedStorageKey = "tf-dashboard-obrigacoes-finalizadas";
@@ -616,6 +629,7 @@ export default function DashboardAgendaObrigacoes() {
   const [obrigacoes, setObrigacoes] = useState<Obrigacao[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [tarefas, setTarefas] = useState<Tarefa[]>(() => loadTasks());
+  const [tarefasPessoais, setTarefasPessoais] = useState<TarefaPessoal[]>([]);
   const [allowedTaskSetores, setAllowedTaskSetores] = useState<string[] | null>(null);
   const [search, setSearch] = useState("");
   const [periodicidade, setPeriodicidade] = useState("Todas");
@@ -645,6 +659,8 @@ export default function DashboardAgendaObrigacoes() {
   const [feedback, setFeedback] = useState("");
   const [confirmModal, setConfirmModal] = useState<{ tarefa: AgendaTarefa; cliente: string } | null>(null);
   const [confirmObrigacaoModal, setConfirmObrigacaoModal] = useState<{ obrigacao: AgendaObrigacao; cliente: Cliente } | null>(null);
+  const [confirmPessoalModal, setConfirmPessoalModal] = useState<{ ocorrencia: OcorrenciaTarefaPessoal; cliente: ClienteDaTarefa | null } | null>(null);
+  const [expandedPessoalId, setExpandedPessoalId] = useState<string | null>(null);
   const today = useMemo(() => startOfDay(new Date()), []);
 
   useEffect(() => {
@@ -660,9 +676,10 @@ export default function DashboardAgendaObrigacoes() {
       setIsLoading(true);
       setFeedback("");
 
-      const [{ response, result }, usuariosResult] = await Promise.all([
+      const [{ response, result }, usuariosResult, pessoaisResult] = await Promise.all([
         loadAgendaData(),
         loadUsuariosSistema(),
+        requisitarApi<TarefasPessoaisApiResponse>("/api/tarefas-pessoais"),
       ]);
 
       if (!response?.ok) {
@@ -673,6 +690,7 @@ export default function DashboardAgendaObrigacoes() {
 
       setObrigacoes(result.obrigacoes ?? []);
       setClientes(result.clientes ?? []);
+      setTarefasPessoais(pessoaisResult.ok ? pessoaisResult.result.tarefas ?? [] : []);
 
       const loggedUser = getLoggedUser();
       const usuarioSistema = usuariosResult.usuarios?.find((usuario) =>
@@ -833,6 +851,17 @@ export default function DashboardAgendaObrigacoes() {
     });
   }, [agendaObrigacoes, getClientesDaObrigacao, periodicidade, search]);
 
+  const agendaPessoais = useMemo(() => {
+    const searchText = search.toLowerCase();
+
+    return gerarAgendaPessoal(tarefasPessoais, clientes, today).filter((ocorrencia) => {
+      const nomesDosClientes = ocorrencia.clientesPendentes.map(nomeDoCliente).join(" ");
+      return `${ocorrencia.tarefa.titulo} ${ocorrencia.tarefa.descricao ?? ""} ${ocorrencia.dataLabel} ${nomesDosClientes}`
+        .toLowerCase()
+        .includes(searchText);
+    });
+  }, [clientes, search, tarefasPessoais, today]);
+
   const agendaItems = useMemo<AgendaItem[]>(() => {
     return [
       ...filteredObrigacoes.map((obrigacao) => ({
@@ -845,13 +874,18 @@ export default function DashboardAgendaObrigacoes() {
         sortDate: tarefa.dataVencimento,
         item: tarefa,
       })),
+      ...agendaPessoais.map((ocorrencia) => ({
+        tipoAgenda: "pessoal" as const,
+        sortDate: ocorrencia.data,
+        item: ocorrencia,
+      })),
     ].sort((a, b) => {
       if (!a.sortDate && !b.sortDate) return 0;
       if (!a.sortDate) return 1;
       if (!b.sortDate) return -1;
       return a.sortDate.getTime() - b.sortDate.getTime();
     });
-  }, [agendaTarefas, filteredObrigacoes]);
+  }, [agendaPessoais, agendaTarefas, filteredObrigacoes]);
 
   const groupedByDate = useMemo(() => {
     return agendaItems.reduce<Record<string, AgendaItem[]>>((groups, agendaItem) => {
@@ -892,6 +926,40 @@ export default function DashboardAgendaObrigacoes() {
     }));
   }
 
+  async function concluirTarefaPessoal(ocorrencia: OcorrenciaTarefaPessoal, cliente: ClienteDaTarefa | null) {
+    const clienteId = cliente?.id ?? null;
+
+    // Some da agenda na hora; se o servidor recusar, volta com o aviso.
+    setTarefasPessoais((current) =>
+      current.map((tarefa) =>
+        tarefa.id === ocorrencia.tarefa.id
+          ? { ...tarefa, conclusoes: [...tarefa.conclusoes, { data: ocorrencia.dataChave, clienteId }] }
+          : tarefa
+      )
+    );
+
+    const { ok, result } = await requisitarApi<{ error?: string }>("/api/tarefas-pessoais/conclusoes", {
+      method: "POST",
+      body: JSON.stringify({ tarefaId: ocorrencia.tarefa.id, data: ocorrencia.dataChave, clienteId }),
+    });
+
+    if (!ok) {
+      setFeedback(result.error || "Não foi possível concluir a tarefa.");
+      setTarefasPessoais((current) =>
+        current.map((tarefa) =>
+          tarefa.id === ocorrencia.tarefa.id
+            ? {
+                ...tarefa,
+                conclusoes: tarefa.conclusoes.filter(
+                  (conclusao) => conclusao.data !== ocorrencia.dataChave || conclusao.clienteId !== clienteId
+                ),
+              }
+            : tarefa
+        )
+      );
+    }
+  }
+
   const stats = useMemo(() => {
     const pendentesNoPrazo = agendaItems.filter((agendaItem) => isDueWithinFiveDays(agendaItem.item.diasAteVencer)).length;
     const pendentesVencidos = agendaItems.filter((agendaItem) => isOverdue(agendaItem.item.diasAteVencer)).length;
@@ -907,7 +975,12 @@ export default function DashboardAgendaObrigacoes() {
     const proxima = agendaItems.find((agendaItem) => agendaItem.sortDate);
     const vencidas = agendaItems.filter((agendaItem) => isOverdue(agendaItem.item.diasAteVencer)).length;
     const semPrazo = activeObrigacoes.filter((obrigacao) => !normalizeText(obrigacao.prazo)).length;
-    const proximaNome = proxima?.tipoAgenda === "tarefa" ? proxima.item.titulo : proxima?.item.nome;
+    const proximaNome =
+      proxima?.tipoAgenda === "tarefa"
+        ? proxima.item.titulo
+        : proxima?.tipoAgenda === "pessoal"
+          ? proxima.item.tarefa.titulo
+          : proxima?.item.nome;
 
     return [
       {
@@ -937,7 +1010,7 @@ export default function DashboardAgendaObrigacoes() {
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sky-300">Agenda por data</p>
           <h2 className="mt-2 text-xl font-black">Agenda das proximas entregas</h2>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-400">
-            Obrigações e tarefas aparecem juntas por data dentro da janela dos próximos 3 meses. O que vencer e não for finalizado permanece em vermelho até a conclusão.
+            Obrigações, tarefas do escritório e as suas tarefas do My Desktop aparecem juntas por data dentro da janela dos próximos 3 meses. O que vencer e não for finalizado permanece em vermelho até a conclusão. As tarefas pessoais só aparecem para quem as cadastrou.
           </p>
         </div>
       </div>
@@ -1024,6 +1097,118 @@ export default function DashboardAgendaObrigacoes() {
 
                     <div className="mt-3 grid gap-2">
                       {items.map((agendaItem) => {
+                        if (agendaItem.tipoAgenda === "pessoal") {
+                          const ocorrencia = agendaItem.item;
+                          const isPrazoPendente = isDueWithinFiveDays(ocorrencia.diasAteVencer);
+                          const isPessoalVencida = isOverdue(ocorrencia.diasAteVencer);
+                          const temClientes = ocorrencia.totalDeClientes > 0;
+                          const isExpanded = expandedPessoalId === ocorrencia.chave;
+                          const fundoPessoal = isPessoalVencida
+                            ? "bg-rose-300/15"
+                            : isPrazoPendente
+                              ? "bg-amber-300/15"
+                              : "bg-white/[0.035]";
+
+                          const cabecalhoPessoal = (
+                            <>
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {temClientes && (
+                                    <span className={`grid size-5 place-items-center rounded-full text-[10px] font-black text-slate-950 ${isPessoalVencida ? "bg-rose-300" : isPrazoPendente ? "bg-amber-300" : "bg-emerald-300"}`}>
+                                      {isExpanded ? "-" : "+"}
+                                    </span>
+                                  )}
+                                  <strong className={`truncate text-xs ${isPessoalVencida ? "text-rose-50" : isPrazoPendente ? "text-amber-50" : "text-emerald-100"}`}>
+                                    {ocorrencia.tarefa.titulo}
+                                  </strong>
+                                  <span className="rounded-full border border-emerald-300/25 bg-emerald-300/10 px-2 py-0.5 text-[10px] font-bold text-emerald-100">
+                                    Minha tarefa
+                                  </span>
+                                  <span className="rounded-full border border-white/10 bg-slate-950/65 px-2 py-0.5 text-[10px] font-bold text-slate-400">
+                                    Só você vê
+                                  </span>
+                                  {temClientes && (
+                                    <span className="rounded-full border border-white/10 bg-slate-950/65 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+                                      {ocorrencia.clientesPendentes.length} cliente(s)
+                                    </span>
+                                  )}
+                                </div>
+                                <p className={`mt-1 line-clamp-1 text-[11px] ${isPessoalVencida ? "text-rose-100/70" : isPrazoPendente ? "text-amber-100/70" : "text-slate-500"}`}>
+                                  {ocorrencia.tarefa.descricao || "Tarefa cadastrada por você no My Desktop"}
+                                </p>
+                              </div>
+
+                              <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] max-[720px]:justify-start">
+                                <span className="rounded-full border border-white/10 bg-slate-950/65 px-2 py-1 font-bold text-slate-300">
+                                  {ocorrencia.tarefa.tipo === "Recorrente" ? ocorrencia.tarefa.recorrencia : "Única"}
+                                </span>
+                                <span className={`rounded-full border px-2 py-1 font-bold ${getDueTone(ocorrencia.diasAteVencer)}`}>
+                                  {formatDueDistance(ocorrencia.diasAteVencer)}
+                                </span>
+                                {!temClientes && (
+                                  <button
+                                    className="min-h-7 rounded-md bg-emerald-300 px-2.5 text-[10px] font-black text-slate-950 transition hover:bg-emerald-200"
+                                    onClick={() => setConfirmPessoalModal({ ocorrencia, cliente: null })}
+                                    type="button"
+                                  >
+                                    Concluir
+                                  </button>
+                                )}
+                              </div>
+                            </>
+                          );
+
+                          // Com clientes a tarefa abre a lista e finaliza um por
+                          // um, igual a obrigacao logo abaixo.
+                          if (!temClientes) {
+                            return (
+                              <section
+                                className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-white/10 px-3 py-2.5 max-[720px]:grid-cols-1 ${fundoPessoal}`}
+                                key={`pessoal-${ocorrencia.chave}`}
+                              >
+                                {cabecalhoPessoal}
+                              </section>
+                            );
+                          }
+
+                          return (
+                            <section className="rounded-lg border border-white/10 bg-slate-950/25" key={`pessoal-${ocorrencia.chave}`}>
+                              <button
+                                className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:brightness-125 max-[720px]:grid-cols-1 ${fundoPessoal}`}
+                                onClick={() => setExpandedPessoalId((current) => (current === ocorrencia.chave ? null : ocorrencia.chave))}
+                                type="button"
+                              >
+                                {cabecalhoPessoal}
+                              </button>
+
+                              {isExpanded && (
+                                <div className="grid gap-2 border-t border-white/10 bg-slate-950/45 p-3">
+                                  {ocorrencia.clientesPendentes.map((cliente) => (
+                                    <div
+                                      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2 max-[640px]:grid-cols-1"
+                                      key={cliente.id}
+                                    >
+                                      <div className="min-w-0">
+                                        <strong className="block truncate text-xs text-slate-100">{nomeDoCliente(cliente)}</strong>
+                                        <span className="mt-1 block truncate text-[11px] text-slate-500">
+                                          {cliente.identificacao || "Sem identificacao"} - {cliente.regime_tributario || "Sem regime"}
+                                        </span>
+                                      </div>
+                                      <button
+                                        className="min-h-7 rounded-md bg-emerald-300 px-2.5 text-[10px] font-black text-slate-950 transition hover:bg-emerald-200"
+                                        onClick={() => setConfirmPessoalModal({ ocorrencia, cliente })}
+                                        type="button"
+                                      >
+                                        Finalizar
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </section>
+                          );
+                        }
+
                         if (agendaItem.tipoAgenda === "tarefa") {
                           const tarefa = agendaItem.item;
                           const isPrazoPendente = isDueWithinFiveDays(tarefa.diasAteVencer);
@@ -1211,12 +1396,60 @@ export default function DashboardAgendaObrigacoes() {
           </div>
         </div>
       )}
+      {confirmPessoalModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 backdrop-blur-sm" suppressHydrationWarning>
+          <div className="rounded-2xl border border-white/10 bg-[#061020] p-6 shadow-2xl max-w-sm">
+            <h2 className="text-lg font-black text-slate-100">
+              Confirmar {confirmPessoalModal.cliente ? "Finalização" : "Conclusão"}
+            </h2>
+            <p className="mt-3 text-sm text-slate-300">
+              {confirmPessoalModal.cliente ? (
+                <>
+                  Finalizar <strong>{confirmPessoalModal.ocorrencia.tarefa.titulo}</strong> para{" "}
+                  <strong>{nomeDoCliente(confirmPessoalModal.cliente)}</strong> em {confirmPessoalModal.ocorrencia.dataLabel}?
+                </>
+              ) : (
+                <>
+                  Concluir <strong>{confirmPessoalModal.ocorrencia.tarefa.titulo}</strong> em{" "}
+                  {confirmPessoalModal.ocorrencia.dataLabel}?
+                </>
+              )}
+              {confirmPessoalModal.ocorrencia.tarefa.tipo === "Recorrente" && (
+                <span className="mt-2 block text-xs text-slate-500">
+                  A tarefa continua valendo para as próximas datas da recorrência.
+                </span>
+              )}
+            </p>
+            <div className="mt-6 flex gap-3 justify-end">
+              <button
+                className="min-h-10 rounded-lg border border-white/10 px-4 text-xs font-bold text-slate-200 transition hover:border-sky-300/40 hover:text-sky-100"
+                onClick={() => setConfirmPessoalModal(null)}
+                type="button"
+              >
+                Não
+              </button>
+              <button
+                className="min-h-10 rounded-lg bg-emerald-300 px-4 text-xs font-black text-slate-950 transition hover:bg-emerald-200"
+                onClick={() => {
+                  concluirTarefaPessoal(confirmPessoalModal.ocorrencia, confirmPessoalModal.cliente);
+                  setConfirmPessoalModal(null);
+                }}
+                type="button"
+              >
+                Sim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {confirmObrigacaoModal && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 backdrop-blur-sm" suppressHydrationWarning>
           <div className="rounded-2xl border border-white/10 bg-[#061020] p-6 shadow-2xl max-w-sm">
             <h2 className="text-lg font-black text-slate-100">Confirmar Finalização</h2>
             <p className="mt-3 text-sm text-slate-300">
-              Deseja realmente finalizar esta obrigação para <strong>{confirmObrigacaoModal.cliente.nome_fantasia}</strong>?
+              {/* Pelo nome fantasia sozinho, cliente sem fantasia preenchida
+                  saia em branco. A lista acima ja mostra a razao social. */}
+              Deseja realmente finalizar esta obrigação para <strong>{nomeDoCliente(confirmObrigacaoModal.cliente)}</strong>?
             </p>
             <div className="mt-6 flex gap-3 justify-end">
               <button
